@@ -19,6 +19,7 @@ import vehicleRoutes from "./routes/vehicles.routes.js";
 import fuelPriceRoutes from "./routes/fuel-prices.routes.js";
 import { refreshFuelPrices, startFuelPricePoller } from "./services/fuel-price.service.js";
 import { startPendingOcrRecovery } from "./services/ocr-queue.service.js";
+import { backfillUsernames } from "./lib/backfill-usernames.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const app = express();
@@ -96,11 +97,17 @@ if (!isServerless) {
     console.log(`Telefondan erişim için bilgisayar IP adresinizi kullanın`);
     startFuelPricePoller();
     startPendingOcrRecovery();
+    void backfillUsernames().catch((err) => {
+      console.warn("[users] username backfill:", err);
+    });
   });
 } else {
   // Serverless: tek seferlik çekim (setInterval yok / soğuk start)
   void refreshFuelPrices().catch((err) => {
     console.warn("[fuel-prices] serverless ilk çekim:", err);
+  });
+  void backfillUsernames().catch((err) => {
+    console.warn("[users] username backfill:", err);
   });
 }
 

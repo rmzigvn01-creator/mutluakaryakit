@@ -185,7 +185,8 @@ model VehicleFuelFill {
 
 model User {
   id                   String              @id @default(uuid())
-  email                String              @unique
+  username             String?             @unique
+  email                String?             @unique
   passwordHash         String
   name                 String
   role                 UserRole

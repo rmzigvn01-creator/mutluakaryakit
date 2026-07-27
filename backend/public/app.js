@@ -342,14 +342,14 @@ function showApp() {
 
 // ===== AUTH =====
 async function doLogin() {
-  const email = document.getElementById('loginEmail').value.trim();
+  const username = (document.getElementById('loginUsername') || document.getElementById('loginEmail'))?.value.trim();
   const password = document.getElementById('loginPassword').value;
   const errEl = document.getElementById('loginError');
   errEl.classList.add('hidden');
   document.getElementById('loginBtn').disabled = true;
 
   try {
-    const data = await api('POST', '/auth/login', { email, password });
+    const data = await api('POST', '/auth/login', { username, password });
     token = data.token;
     currentUser = data.user;
     localStorage.setItem('token', token);
@@ -371,6 +371,9 @@ function doLogout() {
 }
 
 document.getElementById('loginPassword').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+document.getElementById('loginUsername')?.addEventListener('keydown', e => {
   if (e.key === 'Enter') doLogin();
 });
 
@@ -1349,12 +1352,13 @@ async function showUsers() {
     }
     list.innerHTML = usersCache.map(u => {
       const self = u.id === currentUser.id;
+      const nick = u.username || (u.email ? u.email.split('@')[0] : '—');
       return `
       <div class="tx-item${!u.isActive ? ' suspicious' : ''}">
         <div class="tx-header">
           <div>
             <div class="tx-amount">${escHtml(u.name)}${self ? ' <span style="font-size:12px;font-weight:600;color:var(--po-gray-light)">(siz)</span>' : ''}</div>
-            <div class="tx-type">${escHtml(u.email)}</div>
+            <div class="tx-type">@${escHtml(nick)}</div>
           </div>
           <span class="tx-badge ${u.isActive ? 'normal' : 'suspicious'}">${u.isActive ? (ROLE_LABELS[u.role] || u.role) : 'Pasif'}</span>
         </div>
@@ -1380,15 +1384,17 @@ function openUserModalById(id) {
 
 function openUserModal(user = null) {
   const isEdit = Boolean(user);
+  const nick = user?.username || (user?.email ? user.email.split('@')[0] : '');
   openModal(isEdit ? 'Üye Düzenle' : 'Yeni Üye', `
     <div class="form-group">
       <label>Ad Soyad *</label>
       <input type="text" id="userName" value="${escHtml(user?.name || '')}" placeholder="Örn: Ali Yılmaz" autocomplete="off">
     </div>
     <div class="form-group">
-      <label>E-posta *</label>
-      <input type="email" id="userEmail" value="${escHtml(user?.email || '')}" placeholder="ornek@mutluakaryakit.local"
-        ${isEdit ? 'disabled' : ''} autocomplete="off">
+      <label>Kullanıcı adı (nick) *</label>
+      <input type="text" id="userUsername" value="${escHtml(nick)}" placeholder="örn: ali"
+        autocomplete="off">
+      <p class="credit-hint">Giriş bu nick ile yapılır (e-posta gerekmez).</p>
     </div>
     <div class="form-group">
       <label>Rol *</label>
@@ -1419,23 +1425,23 @@ function openUserModal(user = null) {
 
 async function saveUser(id) {
   const name = document.getElementById('userName').value.trim();
+  const username = document.getElementById('userUsername').value.trim();
   const role = document.getElementById('userRole').value;
   const password = document.getElementById('userPassword').value;
   if (!name) return toast('Ad soyad zorunlu');
+  if (!username) return toast('Kullanıcı adı (nick) zorunlu');
 
   try {
     if (id) {
-      const body = { name, role };
+      const body = { name, username, role };
       const activeEl = document.getElementById('userActive');
       if (activeEl && !activeEl.disabled) body.isActive = activeEl.value === 'true';
       if (password) body.password = password;
       await api('PATCH', `/admin/users/${id}`, body);
       toast('Üye güncellendi');
     } else {
-      const email = document.getElementById('userEmail').value.trim();
-      if (!email) return toast('E-posta zorunlu');
       if (!password || password.length < 6) return toast('Şifre en az 6 karakter olmalı');
-      await api('POST', '/admin/users', { name, email, password, role });
+      await api('POST', '/admin/users', { name, username, password, role });
       toast('Üye eklendi');
     }
     closeModal();

@@ -5,6 +5,7 @@ import { prisma } from "../lib/prisma.js";
 import { authMiddleware, requireRoles, AuthRequest } from "../middleware/auth.js";
 import { logAudit } from "../services/audit.service.js";
 import { routeId } from "../lib/route-id.js";
+import { isValidUsername, normalizeUsername } from "../lib/username.js";
 
 const router = Router();
 
@@ -19,7 +20,8 @@ const USER_ROLES = new Set<UserRole>([
 
 function publicUser(user: {
   id: string;
-  email: string;
+  username: string | null;
+  email: string | null;
   name: string;
   role: UserRole;
   isActive: boolean;
@@ -27,6 +29,7 @@ function publicUser(user: {
 }) {
   return {
     id: user.id,
+    username: user.username,
     email: user.email,
     name: user.name,
     role: user.role,
@@ -41,6 +44,7 @@ router.get("/users", async (req: AuthRequest, res) => {
     where: { stationId: req.user!.stationId },
     select: {
       id: true,
+      username: true,
       email: true,
       name: true,
       role: true,
@@ -55,40 +59,47 @@ router.get("/users", async (req: AuthRequest, res) => {
 
 // Yeni üye ekle
 router.post("/users", async (req: AuthRequest, res) => {
-  const { name, email, password, role } = req.body as {
+  const { name, username, password, role } = req.body as {
     name?: string;
-    email?: string;
+    username?: string;
     password?: string;
     role?: UserRole;
   };
 
   const trimmedName = name?.trim() || "";
-  const trimmedEmail = email?.trim().toLowerCase() || "";
+  const nick = normalizeUsername(username || "");
   const userRole = role && USER_ROLES.has(role) ? role : null;
 
-  if (!trimmedName || !trimmedEmail || !password || !userRole) {
-    res.status(400).json({ error: "Ad, e-posta, şifre ve rol gerekli" });
+  if (!trimmedName || !nick || !password || !userRole) {
+    res.status(400).json({ error: "Ad, kullanıcı adı (nick), şifre ve rol gerekli" });
+    return;
+  }
+  if (!isValidUsername(nick)) {
+    res.status(400).json({
+      error: "Nick 3–32 karakter; harf, rakam, nokta, alt çizgi veya tire olmalı",
+    });
     return;
   }
   if (password.length < 6) {
     res.status(400).json({ error: "Şifre en az 6 karakter olmalı" });
     return;
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-    res.status(400).json({ error: "Geçerli bir e-posta girin" });
-    return;
-  }
 
-  const existing = await prisma.user.findUnique({ where: { email: trimmedEmail } });
+  const existing = await prisma.user.findFirst({
+    where: {
+      OR: [{ username: nick }, { email: nick }],
+    },
+  });
   if (existing) {
-    res.status(409).json({ error: "Bu e-posta zaten kayıtlı" });
+    res.status(409).json({ error: "Bu kullanıcı adı zaten kayıtlı" });
     return;
   }
 
   const user = await prisma.user.create({
     data: {
       name: trimmedName,
-      email: trimmedEmail,
+      username: nick,
+      email: null,
       passwordHash: await bcrypt.hash(password, 10),
       role: userRole,
       stationId: req.user!.stationId,
@@ -96,6 +107,7 @@ router.post("/users", async (req: AuthRequest, res) => {
     },
     select: {
       id: true,
+      username: true,
       email: true,
       name: true,
       role: true,
@@ -105,18 +117,19 @@ router.post("/users", async (req: AuthRequest, res) => {
   });
 
   await logAudit(req.user!.userId, "USER_CREATE", "User", user.id, {
-    email: user.email,
+    username: user.username,
     role: user.role,
   });
 
   res.status(201).json({ user: publicUser(user) });
 });
 
-// Üye güncelle (ad, rol, aktiflik, isteğe bağlı şifre)
+// Üye güncelle (ad, nick, rol, aktiflik, isteğe bağlı şifre)
 router.patch("/users/:id", async (req: AuthRequest, res) => {
   const id = routeId(req.params.id);
-  const { name, role, isActive, password } = req.body as {
+  const { name, username, role, isActive, password } = req.body as {
     name?: string;
+    username?: string;
     role?: UserRole;
     isActive?: boolean;
     password?: string;
@@ -132,12 +145,34 @@ router.patch("/users/:id", async (req: AuthRequest, res) => {
 
   const data: {
     name?: string;
+    username?: string;
     role?: UserRole;
     isActive?: boolean;
     passwordHash?: string;
   } = {};
 
   if (typeof name === "string" && name.trim()) data.name = name.trim();
+
+  if (typeof username === "string" && username.trim()) {
+    const nick = normalizeUsername(username);
+    if (!isValidUsername(nick)) {
+      res.status(400).json({
+        error: "Nick 3–32 karakter; harf, rakam, nokta, alt çizgi veya tire olmalı",
+      });
+      return;
+    }
+    const taken = await prisma.user.findFirst({
+      where: {
+        id: { not: id },
+        OR: [{ username: nick }, { email: nick }],
+      },
+    });
+    if (taken) {
+      res.status(409).json({ error: "Bu kullanıcı adı zaten kayıtlı" });
+      return;
+    }
+    data.username = nick;
+  }
 
   if (role !== undefined) {
     if (!USER_ROLES.has(role)) {
@@ -195,6 +230,7 @@ router.patch("/users/:id", async (req: AuthRequest, res) => {
     data,
     select: {
       id: true,
+      username: true,
       email: true,
       name: true,
       role: true,
@@ -205,6 +241,7 @@ router.patch("/users/:id", async (req: AuthRequest, res) => {
 
   await logAudit(req.user!.userId, "USER_UPDATE", "User", user.id, {
     name: data.name,
+    username: data.username,
     role: data.role,
     isActive: data.isActive,
     passwordReset: Boolean(data.passwordHash),

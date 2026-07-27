@@ -2,24 +2,38 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
 import { signToken } from "../lib/jwt.js";
+import { normalizeUsername } from "../lib/username.js";
 
 const router = Router();
 
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body as { email?: string; password?: string };
+  const { username, email, password, login } = req.body as {
+    username?: string;
+    email?: string;
+    password?: string;
+    login?: string;
+  };
 
-  if (!email || !password) {
-    res.status(400).json({ error: "E-posta ve şifre gerekli" });
+  const rawLogin = (username || login || email || "").trim();
+  if (!rawLogin || !password) {
+    res.status(400).json({ error: "Kullanıcı adı ve şifre gerekli" });
     return;
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: email.toLowerCase() },
+  const nick = normalizeUsername(rawLogin);
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { username: nick },
+        { email: nick },
+        ...(rawLogin.includes("@") ? [{ email: rawLogin.toLowerCase() }] : []),
+      ],
+    },
     include: { station: true },
   });
 
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-    res.status(401).json({ error: "E-posta veya şifre hatalı" });
+    res.status(401).json({ error: "Kullanıcı adı veya şifre hatalı" });
     return;
   }
 
@@ -38,6 +52,7 @@ router.post("/login", async (req, res) => {
     token,
     user: {
       id: user.id,
+      username: user.username,
       email: user.email,
       name: user.name,
       role: user.role,
@@ -69,6 +84,7 @@ router.get("/me", async (req, res) => {
 
     res.json({
       id: user.id,
+      username: user.username,
       email: user.email,
       name: user.name,
       role: user.role,
