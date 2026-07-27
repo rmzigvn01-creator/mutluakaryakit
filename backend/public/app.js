@@ -141,23 +141,68 @@ function getDateTimeMismatch(createdAt, receiptDateTime) {
 }
 
 function renderDateTimeMismatchBox(mismatch) {
-  return `<div class="tx-mismatch-box" role="alert">
-    <div class="tx-mismatch-title">Tarih / saat uyuşmuyor</div>
-    <div class="tx-mismatch-compare">
-      <div class="tx-mismatch-side">
-        <span class="tx-mismatch-lbl">Sistem kaydı</span>
-        <strong class="tx-mismatch-date">${mismatch.createdDate}</strong>
-        <span class="tx-mismatch-time">${mismatch.createdTime}</span>
-      </div>
-      <div class="tx-mismatch-vs" aria-hidden="true">≠</div>
-      <div class="tx-mismatch-side">
-        <span class="tx-mismatch-lbl">Fişteki</span>
-        <strong class="tx-mismatch-date">${mismatch.receiptDate}</strong>
-        <span class="tx-mismatch-time">${mismatch.receiptTime}</span>
-      </div>
+  return `<div class="tx-mismatch-section tx-mismatch-section--time">
+    <div class="tx-mismatch-title">Tarih / saat</div>
+    <div class="tx-mismatch-inline">
+      <span><em>Kayıt</em> ${mismatch.createdDate} ${mismatch.createdTime}</span>
+      <span class="tx-mismatch-vs">≠</span>
+      <span><em>Fiş</em> ${mismatch.receiptDate} ${mismatch.receiptTime}</span>
     </div>
     <div class="tx-mismatch-diff">${mismatch.reason}</div>
   </div>`;
+}
+
+function renderAmountMismatchSection(t) {
+  const entered = Number(t.enteredAmount);
+  const receipt = Number(t.receiptAmount);
+  const diff = Number(t.amountDiff != null ? t.amountDiff : (entered - receipt));
+  const absDiff = Math.abs(diff);
+  const direction = diff > 0 ? 'fazla girilmiş' : 'eksik girilmiş';
+  return `<div class="tx-mismatch-section tx-mismatch-section--amount">
+    <div class="tx-mismatch-title">Fiyat tutarsızlığı</div>
+    <div class="tx-mismatch-amounts">
+      <div class="tx-mismatch-amt">
+        <span class="tx-mismatch-lbl">Girilen</span>
+        <strong>${fmt(entered)}</strong>
+      </div>
+      <div class="tx-mismatch-vs" aria-hidden="true">≠</div>
+      <div class="tx-mismatch-amt">
+        <span class="tx-mismatch-lbl">Fiş</span>
+        <strong>${fmt(receipt)}</strong>
+      </div>
+      <div class="tx-mismatch-amt tx-mismatch-amt--diff">
+        <span class="tx-mismatch-lbl">Fark</span>
+        <strong>${fmt(absDiff)}</strong>
+      </div>
+    </div>
+    <div class="tx-mismatch-diff">Girilen tutar fişten ${fmt(absDiff)} ${direction}</div>
+  </div>`;
+}
+
+function renderSuspicionAlertBox(t) {
+  const hasAmount = t.receiptAmount != null && Math.abs(Number(t.amountDiff != null ? t.amountDiff : (t.enteredAmount - t.receiptAmount))) > 2;
+  const dtMismatch = t.receiptDateTime ? getDateTimeMismatch(t.createdAt, t.receiptDateTime) : null;
+  const isUnreadable = t.suspicionStatus === 'SUSPICIOUS_UNREADABLE';
+  const isPending = t.suspicionStatus === 'PENDING_OCR';
+
+  if (!hasAmount && !dtMismatch && !isUnreadable && !isPending && t.suspicionStatus !== 'SUSPICIOUS_MISMATCH') {
+    return '';
+  }
+
+  let body = '';
+  if (hasAmount) body += renderAmountMismatchSection(t);
+  else if (t.suspicionStatus === 'SUSPICIOUS_MISMATCH') {
+    body += `<div class="tx-mismatch-section"><div class="tx-mismatch-title">Fiyat tutarsızlığı</div><div class="tx-mismatch-diff">Girilen tutar ile fiş tutarı uyuşmuyor</div></div>`;
+  }
+  if (dtMismatch) body += renderDateTimeMismatchBox(dtMismatch);
+  if (!body && isUnreadable) {
+    body = `<div class="tx-mismatch-section"><div class="tx-mismatch-title">Fiş okunamadı</div><div class="tx-mismatch-diff">OCR fişi okuyamadı — fotoğrafı kontrol edin</div></div>`;
+  }
+  if (!body && isPending) {
+    body = `<div class="tx-mismatch-section"><div class="tx-mismatch-title">OCR bekliyor</div><div class="tx-mismatch-diff">Fiş arka planda okunuyor</div></div>`;
+  }
+  if (!body) return '';
+  return `<div class="tx-mismatch-box" role="alert">${body}</div>`;
 }
 
 function renderDateTimeMismatchHtml(createdAt, receiptDateTime) {
@@ -165,14 +210,14 @@ function renderDateTimeMismatchHtml(createdAt, receiptDateTime) {
   if (!mismatch) {
     return `<div class="tx-datetime-ok-line">Fiş saati: ${fmtDate(receiptDateTime)}</div>`;
   }
-  return renderDateTimeMismatchBox(mismatch);
+  return `<div class="tx-mismatch-box" role="alert">${renderDateTimeMismatchBox(mismatch)}</div>`;
 }
 
 function renderDetailDateTimeRow(t) {
   if (!isAdmin() || !t.receiptDateTime) return '';
   const mm = getDateTimeMismatch(t.createdAt, t.receiptDateTime);
   if (mm) {
-    return `<div class="detail-datetime-wrap">${renderDateTimeMismatchBox(mm)}</div>`;
+    return `<div class="detail-datetime-wrap"><div class="tx-mismatch-box" role="alert">${renderDateTimeMismatchBox(mm)}</div></div>`;
   }
   return `<div class="detail-row"><span>Fiş tarih/saat</span><strong>${fmtDate(t.receiptDateTime)}</strong></div>`;
 }
@@ -1288,20 +1333,15 @@ async function showSuspicious() {
       ? `<p class="credit-hint" style="margin-top:12px">Son ${data.transactions.length} kayıt gösteriliyor (toplam ${data.count})</p>`
       : '';
     list.innerHTML = data.transactions.map(t => {
-      const amountWarn = t.receiptAmount && Math.abs(t.amountDiff || 0) > 2
-        ? `<strong>Girilen: ${fmt(t.enteredAmount)} · Fiş: ${fmt(t.receiptAmount)} · Fark: ${fmt(t.amountDiff || 0)}</strong>`
-        : (t.suspicionStatus === 'SUSPICIOUS_MISMATCH' ? SUSPICION_LABELS[t.suspicionStatus] : '');
-      const dateTimeWarn = t.receiptDateTime ? renderDateTimeMismatchHtml(t.createdAt, t.receiptDateTime) : '';
-      const otherWarn = !amountWarn && !dateTimeWarn ? SUSPICION_LABELS[t.suspicionStatus] : '';
+      const alertBox = renderSuspicionAlertBox(t);
       return `
       <div class="tx-item suspicious">
         <div class="tx-amount">${fmt(t.enteredAmount)} — ${TYPE_LABELS[t.type]}</div>
         <div class="tx-meta">
-          Pompacı: ${t.createdBy?.name || '?'} · ${fmtDate(t.createdAt)}<br>
-          ${amountWarn}${otherWarn ? '<br>' + otherWarn : ''}
+          Pompacı: ${t.createdBy?.name || '?'} · ${fmtDate(t.createdAt)}
           ${t.description ? '<br>' + t.description : ''}
         </div>
-        ${dateTimeWarn}
+        ${alertBox}
         <div class="tx-actions">
           <button class="btn btn-sm btn-primary" onclick="showReceiptViewer('${t.id}')">Fiş Gör</button>
           <button class="btn btn-sm btn-warning" onclick="openReviewSuspiciousModal('${t.id}')">İncelendi</button>
