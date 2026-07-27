@@ -641,11 +641,11 @@ async function showNewTransaction() {
     <div class="form-row-2">
       <div class="form-group">
         <label>Fiş No</label>
-        <input type="text" id="txReceiptNo" placeholder="Örn: 0222" inputmode="numeric">
+        <input type="text" id="txReceiptNo" placeholder="" inputmode="numeric" autocomplete="off" name="receipt-no">
       </div>
       <div class="form-group">
         <label>Plaka</label>
-        <input type="text" id="txPlate" placeholder="34 ABC 123" autocomplete="off" style="text-transform:uppercase">
+        <input type="text" id="txPlate" placeholder="" autocomplete="off" name="vehicle-plate" style="text-transform:uppercase">
       </div>
     </div>
     <div class="form-row-2">
