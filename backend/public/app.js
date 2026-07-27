@@ -587,7 +587,6 @@ async function showNewTransaction() {
 
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
-  // Europe/Istanbul yaklaşık: tarayıcı yerel saati (TR)
   const defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
@@ -595,16 +594,16 @@ async function showNewTransaction() {
   document.getElementById('mainContent').innerHTML = `
     ${pageHeader('Yeni İşlem Kaydı')}
     <p class="credit-hint" style="margin-bottom:14px">
-      Tutar ve bilgileri siz girin. Fiş fotoğrafı zorunlu — sistem kayıttan sonra fişi okuyup uyuşmazlıkta şüpheliye düşürür.
+      Bilgileri siz girin, fiş fotoğrafını ekleyip kaydedin. Sistem fişi arka planda kontrol eder.
     </p>
     <div class="form-group">
-      <label>İşlem Tipi</label>
-      <select id="txType">
-        <option value="CARD_POS">Kart (POS)</option>
-        <option value="FUEL_BENZIN">Benzin</option>
+      <label>Yakıt / İşlem Tipi</label>
+      <select id="txType" onchange="onTxTypeChanged()">
         <option value="FUEL_MOTORIN">Motorin</option>
+        <option value="FUEL_BENZIN">Benzin</option>
+        <option value="OTHER">Otogaz</option>
+        <option value="CARD_POS">Kart (POS)</option>
         <option value="CASH">Nakit</option>
-        <option value="OTHER">Otogaz / Diğer</option>
       </select>
     </div>
     <div class="form-group credit-toggle-wrap" id="creditToggleWrap">
@@ -645,8 +644,27 @@ async function showNewTransaction() {
         <input type="text" id="txReceiptNo" placeholder="Örn: 0222" inputmode="numeric">
       </div>
       <div class="form-group">
+        <label>Plaka</label>
+        <input type="text" id="txPlate" placeholder="34 ABC 123" autocomplete="off" style="text-transform:uppercase">
+      </div>
+    </div>
+    <div class="form-row-2">
+      <div class="form-group">
         <label>Litre</label>
-        <input type="number" id="txLiters" placeholder="0.000" step="0.001" min="0">
+        <input type="number" id="txLiters" placeholder="0.000" step="0.001" min="0" oninput="onLitersOrPriceChanged()">
+      </div>
+      <div class="form-group">
+        <label>Birim fiyat (TL/lt)</label>
+        <input type="number" id="txUnitPrice" placeholder="0.00" step="0.01" min="0" readonly oninput="onLitersOrPriceChanged()">
+        <label class="credit-check-label" for="txManualPrice" style="margin-top:8px">
+          <input type="checkbox" id="txManualPrice" onchange="onManualPriceToggle()">
+          <span class="credit-switch" aria-hidden="true"></span>
+          <span class="credit-copy">
+            <strong>Manuel fiyat</strong>
+            <small>Sorun olursa işaretleyip fiyatı elle girin</small>
+          </span>
+        </label>
+        <p class="credit-hint" id="txPriceHint">PO İpsala güncel fiyatı</p>
       </div>
     </div>
     <div class="form-row-2">
@@ -660,13 +678,13 @@ async function showNewTransaction() {
       </div>
     </div>
     <div class="form-group">
-      <label>Tutar (TL) *</label>
-      <input type="number" id="txAmount" placeholder="0.00" step="0.01" min="0">
-      <p class="credit-hint" id="txAmountHint">Fişteki TOPLAM tutarı girin</p>
+      <label>Toplam tutar (TL) *</label>
+      <input type="number" id="txAmount" placeholder="0.00" step="0.01" min="0" oninput="this.dataset.touched='1'">
+      <p class="credit-hint" id="txAmountHint">Fişteki TOPLAM — litre × fiyattan öneri gelir</p>
     </div>
     <div class="form-group">
       <label>Açıklama</label>
-      <input type="text" id="txDesc" placeholder="Örn: Motorin 40 lt · Plaka 34 ABC">
+      <input type="text" id="txDesc" placeholder="İsteğe bağlı not">
     </div>
     <div class="form-group">
       <label>Fiş Fotoğrafı *</label>
@@ -682,12 +700,91 @@ async function showNewTransaction() {
     <button class="btn btn-primary" onclick="saveTransaction()" id="saveBtn">Kaydet</button>
   `;
   receiptFile = null;
-  window.__ocrUnitPrice = null;
-  window.__ocrAmountSource = null;
+  window.__poPrices = null;
   ocrBusy = false;
   toggleSaleOptions();
   loadCreditCustomersForSale();
   loadVehiclesForSale();
+  void loadPoPricesForForm();
+}
+
+async function loadPoPricesForForm() {
+  try {
+    const data = await api('GET', '/fuel-prices/current');
+    window.__poPrices = data.prices || null;
+  } catch {
+    window.__poPrices = null;
+  }
+  applyPoPriceForType();
+}
+
+function applyPoPriceForType() {
+  const type = document.getElementById('txType')?.value;
+  const priceEl = document.getElementById('txUnitPrice');
+  const hint = document.getElementById('txPriceHint');
+  const manual = document.getElementById('txManualPrice')?.checked;
+  if (!priceEl) return;
+
+  const p = window.__poPrices;
+  let unit = null;
+  let label = 'PO fiyatı yok';
+  if (p) {
+    if (type === 'FUEL_BENZIN') { unit = p.benzin; label = 'PO İpsala Benzin'; }
+    else if (type === 'FUEL_MOTORIN') { unit = p.motorin; label = 'PO İpsala Motorin'; }
+    else if (type === 'OTHER') { unit = p.lpg; label = 'PO İpsala Otogaz'; }
+  }
+
+  if (!manual && unit != null) {
+    priceEl.value = Number(unit).toFixed(2);
+    priceEl.readOnly = true;
+  } else if (!manual) {
+    priceEl.value = '';
+    priceEl.readOnly = true;
+  } else {
+    priceEl.readOnly = false;
+  }
+
+  if (hint) {
+    hint.textContent = unit != null
+      ? `${label}: ${Number(unit).toFixed(2)} TL/lt`
+      : (type === 'CARD_POS' || type === 'CASH'
+        ? 'Kart/nakit için birim fiyat gerekmez'
+        : 'PO fiyatı yok — Manuel fiyat işaretleyin');
+  }
+  onLitersOrPriceChanged();
+}
+
+function onTxTypeChanged() {
+  const manual = document.getElementById('txManualPrice');
+  if (manual) manual.checked = false;
+  const amountEl = document.getElementById('txAmount');
+  if (amountEl) delete amountEl.dataset.touched;
+  applyPoPriceForType();
+}
+
+function onManualPriceToggle() {
+  const manual = document.getElementById('txManualPrice')?.checked;
+  const priceEl = document.getElementById('txUnitPrice');
+  if (!priceEl) return;
+  if (manual) {
+    priceEl.readOnly = false;
+    priceEl.focus();
+  } else {
+    applyPoPriceForType();
+  }
+}
+
+function onLitersOrPriceChanged() {
+  const liters = parseFloat(document.getElementById('txLiters')?.value);
+  const unit = parseFloat(document.getElementById('txUnitPrice')?.value);
+  const amountEl = document.getElementById('txAmount');
+  const hint = document.getElementById('txAmountHint');
+  if (!amountEl) return;
+  if (liters > 0 && unit > 0) {
+    const suggested = Math.round(liters * unit * 100) / 100;
+    if (!amountEl.dataset.touched) amountEl.value = suggested.toFixed(2);
+    if (hint) hint.textContent = `Öneri: ${liters.toLocaleString('tr-TR')} lt × ${unit.toFixed(2)} = ${fmt(suggested)}`;
+  }
 }
 
 function setOcrStatus(msg, kind = 'info') {
@@ -700,103 +797,6 @@ function setOcrStatus(msg, kind = 'info') {
   }
   el.className = `ocr-status ${kind}`;
   el.textContent = msg;
-}
-
-function recalcAmountFromLiters() {
-  // TOPLAM fişten geldiyse litre×fiyat ile ezme
-  if (window.__ocrAmountSource === 'toplam') return;
-  const liters = parseFloat(document.getElementById('txLiters')?.value);
-  const unit = window.__ocrUnitPrice;
-  if (!liters || liters <= 0 || !unit) return;
-  const amount = Math.round(liters * unit * 100) / 100;
-  const amountEl = document.getElementById('txAmount');
-  if (amountEl) amountEl.value = amount.toFixed(2);
-  const hint = document.getElementById('txAmountHint');
-  if (hint) {
-    hint.textContent = `${liters.toLocaleString('tr-TR')} lt × ${unit.toFixed(2)} TL = ${fmt(amount)} (PO İpsala, KDV dahil)`;
-  }
-}
-
-function applyOcrExtraction(extraction, prices) {
-  if (!extraction) return;
-
-  window.__ocrAmountSource = extraction.amountSource || null;
-
-  if (extraction.suggestedType) {
-    const typeEl = document.getElementById('txType');
-    if (typeEl) typeEl.value = extraction.suggestedType;
-  }
-  if (extraction.receiptNo) {
-    const el = document.getElementById('txReceiptNo');
-    if (el) el.value = extraction.receiptNo;
-  }
-  if (extraction.liters != null) {
-    const el = document.getElementById('txLiters');
-    if (el) el.value = extraction.liters;
-  }
-  if (extraction.date) {
-    const el = document.getElementById('txDate');
-    if (el) el.value = extraction.date;
-  }
-  if (extraction.time) {
-    const el = document.getElementById('txTime');
-    if (el) el.value = extraction.time;
-  }
-  if (extraction.unitPrice != null) {
-    window.__ocrUnitPrice = extraction.unitPrice;
-  }
-  if (extraction.amount != null) {
-    const el = document.getElementById('txAmount');
-    if (el) el.value = Number(extraction.amount).toFixed(2);
-  }
-  if (extraction.description) {
-    const el = document.getElementById('txDesc');
-    if (el) el.value = extraction.description;
-  }
-
-  const hint = document.getElementById('txAmountHint');
-  if (hint) {
-    if (extraction.amountSource === 'toplam' && extraction.amount != null) {
-      hint.textContent = `Fiş TOPLAM: ${fmt(extraction.amount)} (sarı alan)`;
-    } else if (extraction.liters != null && extraction.unitPrice != null) {
-      hint.textContent = `${extraction.liters.toLocaleString('tr-TR')} lt × ${extraction.unitPrice.toFixed(2)} TL`;
-    }
-  }
-
-  const parts = [];
-  if (extraction.receiptNo) parts.push(`Fiş No ${extraction.receiptNo}`);
-  if (extraction.date) parts.push(extraction.date.split('-').reverse().join('.'));
-  if (extraction.time) parts.push(extraction.time);
-  if (extraction.fuelKind === 'MOTORIN') parts.push('Motorin');
-  if (extraction.fuelKind === 'BENZIN') parts.push('Benzin');
-  if (extraction.fuelKind === 'LPG') parts.push('Otogaz');
-  if (extraction.liters != null) parts.push(`${extraction.liters} lt`);
-  if (extraction.amount != null) parts.push(`TOPLAM ${fmt(extraction.amount)}`);
-  if (!extraction.readable) {
-    setOcrStatus('Fiş okunamadı — alanları elle doldurun', 'warn');
-  } else {
-    setOcrStatus('Fiş okundu: ' + (parts.join(' · ') || 'alanlar dolduruldu'), 'ok');
-  }
-  if (extraction.amountSource !== 'toplam') recalcAmountFromLiters();
-}
-
-async function runReceiptOcr(file) {
-  if (!file || !navigator.onLine) {
-    setOcrStatus(navigator.onLine ? '' : 'Offline — OCR yapılamadı, alanları elle doldurun', 'warn');
-    return;
-  }
-  ocrBusy = true;
-  setOcrStatus('Fiş okunuyor…', 'info');
-  try {
-    const form = new FormData();
-    form.append('receipt', file);
-    const data = await api('POST', '/transactions/ocr-preview', form, true);
-    applyOcrExtraction(data.extraction, data.prices);
-  } catch (e) {
-    setOcrStatus('OCR hatası: ' + (e.message || 'okunamadı'), 'warn');
-  } finally {
-    ocrBusy = false;
-  }
 }
 
 function toggleSaleOptions(source) {
@@ -913,6 +913,8 @@ async function saveTransaction() {
   const vehicleId = document.getElementById('txVehicle')?.value;
   const receiptNo = document.getElementById('txReceiptNo')?.value?.trim();
   const liters = document.getElementById('txLiters')?.value;
+  const plate = document.getElementById('txPlate')?.value?.trim().toUpperCase();
+  const unitPrice = document.getElementById('txUnitPrice')?.value;
   const txDate = document.getElementById('txDate')?.value;
   const txTime = document.getElementById('txTime')?.value;
 
@@ -927,13 +929,17 @@ async function saveTransaction() {
     if (type === 'FUEL_MOTORIN' && liters) bits.push(`Motorin ${liters} lt`);
     if (type === 'FUEL_BENZIN' && liters) bits.push(`Benzin ${liters} lt`);
     if (type === 'OTHER' && liters) bits.push(`Otogaz ${liters} lt`);
+    if (unitPrice) bits.push(`@ ${Number(unitPrice).toFixed(2)} TL/lt`);
+    if (plate) bits.push(`Plaka ${plate}`);
     if (receiptNo) bits.push(`Fiş No ${receiptNo}`);
     if (txDate && txTime) bits.push(`${txDate.split('-').reverse().join('.')} ${txTime}`);
     desc = bits.join(' · ');
+  } else if (plate && !desc.toUpperCase().includes(plate)) {
+    desc = `${desc} · Plaka ${plate}`;
   }
 
   document.getElementById('saveBtn').disabled = true;
-  setOcrStatus('Kaydediliyor — fiş kontrol ediliyor…', 'info');
+  setOcrStatus('Kaydediliyor…', 'info');
 
   const clientId = crypto.randomUUID();
   let createdAt = new Date().toISOString();
@@ -980,13 +986,10 @@ async function saveTransaction() {
     if (isVehicle && vehicleId) form.append('vehicleId', vehicleId);
     form.append('receipt', receiptFile);
     const data = await api('POST', '/transactions', form, true);
-    const t = data.transaction;
     if (data.creditSale) {
       toast('Kaydedildi — veresiye defterine işlendi');
     } else if (data.vehicleFuel) {
       toast('Kaydedildi — şirket aracı defterine işlendi');
-    } else if (isAdmin() && t.suspicionStatus !== 'NORMAL') {
-      toast('Kaydedildi — şüpheli işlem olarak işaretlendi');
     } else {
       toast('İşlem kaydedildi');
     }

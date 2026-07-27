@@ -15,7 +15,7 @@ import {
 import { prisma } from "../lib/prisma.js";
 import { config } from "../lib/config.js";
 import { authMiddleware, requireRoles, AuthRequest } from "../middleware/auth.js";
-import { extractFromReceipt, evaluateSuspicion, resolveReceiptDateTime, fuelKindToTransactionType } from "../services/ocr.service.js";
+import { extractFromReceipt, evaluateSuspicion, resolveReceiptDateTime, fuelKindToTransactionType, isSuspiciousStatus } from "../services/ocr.service.js";
 import { isAllowedReceiptUpload, normalizeReceiptImage } from "../services/image.service.js";
 import { logAudit } from "../services/audit.service.js";
 import { notifyAdminsSuspiciousTransaction } from "../services/push.service.js";
@@ -31,6 +31,72 @@ const router = Router();
 function resolveReceiptPath(storedPath: string): string {
   if (path.isAbsolute(storedPath)) return storedPath;
   return path.resolve(config.backendRoot, storedPath.replace(/^\.\//, ""));
+}
+
+/** Kayıt sonrası arka plan OCR — isteği bekletmez */
+async function processReceiptOcrInBackground(params: {
+  transactionId: string;
+  filePath: string;
+  originalName: string;
+  enteredAmount: number;
+  createdAt: Date;
+  stationId: string;
+  type: TransactionType;
+  createdBy: { id: string; name: string; email: string };
+}) {
+  try {
+    const extracted = await extractFromReceipt(params.filePath, params.originalName);
+    const receiptDateTime = resolveReceiptDateTime(
+      extracted.text,
+      params.createdAt,
+      extracted.dateTime
+    );
+    const { status, diff } = evaluateSuspicion(
+      params.enteredAmount,
+      extracted.amount,
+      params.createdAt,
+      receiptDateTime
+    );
+
+    const updated = await prisma.transaction.update({
+      where: { id: params.transactionId },
+      data: {
+        receiptAmount: extracted.amount,
+        receiptDateTime,
+        amountDiff: diff,
+        suspicionStatus: status,
+        suspicionNote: extracted.receiptNo
+          ? `OCR fiş no: ${extracted.receiptNo}`
+          : null,
+      },
+      include: {
+        createdBy: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    if (isSuspiciousStatus(status)) {
+      void notifyAdminsSuspiciousTransaction({
+        id: updated.id,
+        stationId: params.stationId,
+        type: params.type,
+        enteredAmount: updated.enteredAmount,
+        receiptAmount: updated.receiptAmount,
+        amountDiff: updated.amountDiff,
+        suspicionStatus: updated.suspicionStatus,
+        createdBy: updated.createdBy,
+      });
+    }
+  } catch (err) {
+    console.warn("Arka plan OCR hatası:", err);
+    try {
+      await prisma.transaction.update({
+        where: { id: params.transactionId },
+        data: { suspicionStatus: SuspicionStatus.SUSPICIOUS_UNREADABLE },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 if (!fs.existsSync(config.uploadDir)) {
@@ -322,22 +388,7 @@ router.post("/", uploadReceipt, async (req: AuthRequest, res) => {
     }
 
     const normalizedPath = await normalizeReceiptImage(req.file.path, req.file.originalname);
-
-    const { amount: receiptAmount, dateTime: parsedDateTime, text: receiptText } =
-      await extractFromReceipt(normalizedPath, req.file.originalname);
-
     const transactionCreatedAt = createdAt ? new Date(createdAt) : new Date();
-    const receiptDateTime = resolveReceiptDateTime(
-      receiptText,
-      transactionCreatedAt,
-      parsedDateTime
-    );
-    const { status, diff } = evaluateSuspicion(
-      amount,
-      receiptAmount,
-      transactionCreatedAt,
-      receiptDateTime
-    );
 
     const TYPE_LABELS: Record<string, string> = {
       FUEL_BENZIN: "Benzin",
@@ -356,15 +407,16 @@ router.post("/", uploadReceipt, async (req: AuthRequest, res) => {
           ? "image/webp"
           : "image/jpeg";
 
+    // Hızlı kayıt — OCR arka planda
     const transaction = await prisma.transaction.create({
       data: {
         clientId: finalClientId,
         stationId: req.user!.stationId,
         type: type as TransactionType,
         enteredAmount: amount,
-        receiptAmount,
-        receiptDateTime,
-        amountDiff: diff,
+        receiptAmount: null,
+        receiptDateTime: null,
+        amountDiff: null,
         description: description || null,
         receiptPath: resolvedPath,
         receiptData: receiptBytes,
@@ -373,7 +425,7 @@ router.post("/", uploadReceipt, async (req: AuthRequest, res) => {
         customerId: creditCustomerId,
         isCompanyVehicle: Boolean(companyVehicleId),
         vehicleId: companyVehicleId,
-        suspicionStatus: status,
+        suspicionStatus: SuspicionStatus.PENDING_OCR,
         createdById: req.user!.userId,
         shiftId: openShift?.id ?? null,
         deviceInfo: deviceInfo || null,
@@ -441,30 +493,29 @@ router.post("/", uploadReceipt, async (req: AuthRequest, res) => {
 
     await logAudit(req.user!.userId, "CREATE", "Transaction", transaction.id, {
       enteredAmount: amount,
-      receiptAmount,
-      receiptDateTime,
-      suspicionStatus: status,
+      suspicionStatus: SuspicionStatus.PENDING_OCR,
       isCredit: Boolean(creditCustomerId),
       customerId: creditCustomerId,
       isCompanyVehicle: Boolean(companyVehicleId),
       vehicleId: companyVehicleId,
     });
 
-    void notifyAdminsSuspiciousTransaction({
-      id: transaction.id,
-      stationId: transaction.stationId,
-      type: transaction.type,
-      enteredAmount: transaction.enteredAmount,
-      receiptAmount: transaction.receiptAmount,
-      amountDiff: transaction.amountDiff,
-      suspicionStatus: transaction.suspicionStatus,
-      createdBy: transaction.createdBy,
-    });
-
     res.status(201).json({
       transaction: sanitizeTransactionForRole(transaction, req.user!.role),
       creditSale: Boolean(creditCustomerId),
       vehicleFuel: Boolean(companyVehicleId),
+    });
+
+    // OCR arka planda — yanıtı bekletmez
+    void processReceiptOcrInBackground({
+      transactionId: transaction.id,
+      filePath: resolvedPath,
+      originalName: req.file.originalname,
+      enteredAmount: amount,
+      createdAt: transaction.createdAt,
+      stationId: transaction.stationId,
+      type: transaction.type,
+      createdBy: transaction.createdBy,
     });
   } catch (err) {
     console.error(err);
