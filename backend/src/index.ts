@@ -48,6 +48,7 @@ app.use("/api/fuel-prices", fuelPriceRoutes);
 app.use(express.static(path.join(__dirname, "../public"), {
   etag: true,
   lastModified: true,
+  index: "index.html",
   setHeaders(res, filePath) {
     if (filePath.endsWith(".html")) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -63,6 +64,18 @@ app.use(express.static(path.join(__dirname, "../public"), {
     }
   },
 }));
+
+// Kök ve bilinmeyen GET'ler → arayüz (Render free "Not Found" / cache karışıklığını azaltır)
+app.get("/{*splat}", (req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    res.status(404).json({ error: "Bulunamadı" });
+    return;
+  }
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.sendFile(path.join(__dirname, "../public/index.html"), (err) => {
+    if (err) next(err);
+  });
+});
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

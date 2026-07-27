@@ -1,25 +1,26 @@
-# Kalıcı yayın (20 yıl hedefi)
+# Kalıcı yayın
 
-## Mimari
-- **Veri:** Neon Postgres (EU) — tablolar + fiş görselleri (`receiptData`)
-- **Uygulama:** Render Starter (Frankfurt, uyumaz) + 10GB disk yedek
-- **Hız:** Neon pooler, gzip, menü paralel yükleme, liste sorgularında binary yok
+## GitHub
+https://github.com/rmzigvn01-creator/mutluakaryakit
 
-## Veri kaybı
-- Fişler Neon’da Bytes olarak saklanır (disk silinse bile kalır)
-- Render disk ek yedek
-- Neon Console’dan Point-in-Time Recovery (ücretli planda) açın
+## Render (7/24)
+1. https://dashboard.render.com/blueprints/new?repoUrl=https://github.com/rmzigvn01-creator/mutluakaryakit
+2. Repo’yu bağlayın → Blueprint Apply
+3. Environment’a Neon string’lerini yapıştırın:
 
-## Yayın adımları
-1. GitHub’a push
-2. Render Blueprint → bu repo
-3. `DATABASE_URL` = Neon **pooled** connection string  
-   `DIRECT_URL` = Neon **direct** (pooler olmayan) string
-4. Deploy → `https://mutluakaryakit.onrender.com` (veya verilen URL)
+### Neon Console
+https://console.neon.tech/app/projects/purple-resonance-43544081
+
+- `DATABASE_URL` → **Pooled** connection string (`-pooler` içeren)
+- `DIRECT_URL` → **Direct** connection string (pooler olmayan)
+
+4. Plan: **Starter** (Free uyur; Starter 7/24 açık kalır — kart gerekir)
+5. Deploy bitince verilen `*.onrender.com` URL’sini kullanın
 
 ### Giriş
 - admin@mutluakaryakit.local / admin123
 - ahmet@mutluakaryakit.local / staff123
 
-## Not
-Ücretsiz Render “sleep” eder; 20 yıl sürekli açık için **Starter+** ve Neon’un ücretli/compute planı gerekir.
+## Veri güvenliği
+- Neon: tüm kayıtlar + fiş görselleri (`receiptData`)
+- Render disk: ek yedek (`/var/data/uploads`)

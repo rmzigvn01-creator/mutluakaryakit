@@ -6,7 +6,7 @@ services:
     plan: starter
     region: frankfurt
     rootDir: backend
-    buildCommand: npm ci && npx prisma generate && npx tsc
+    buildCommand: NPM_CONFIG_PRODUCTION=false npm ci && npx prisma generate && npx tsc
     startCommand: npx prisma db push --skip-generate && node dist/index.js
     healthCheckPath: /health
     disk:
