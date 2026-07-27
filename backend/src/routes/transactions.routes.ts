@@ -122,25 +122,12 @@ router.post("/ocr-preview", uploadReceipt, async (req: AuthRequest, res) => {
       calculatedAmount = Math.round(extracted.liters * unitPrice * 100) / 100;
     }
 
-    const amount = calculatedAmount ?? extracted.amount;
+    // Sarı alan (TOPLAM) öncelikli; yoksa litre × birim fiyat
+    const amount = extracted.amount ?? calculatedAmount;
 
+    const date = extracted.date || "";
+    const time = extracted.time || "";
     const dateTime = extracted.dateTime;
-    let date = "";
-    let time = "";
-    if (dateTime) {
-      const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Europe/Istanbul",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).formatToParts(dateTime);
-      const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
-      date = `${get("year")}-${get("month")}-${get("day")}`;
-      time = `${get("hour")}:${get("minute")}`;
-    }
 
     const typeLabel =
       fuelKind === "MOTORIN"
@@ -158,9 +145,11 @@ router.post("/ocr-preview", uploadReceipt, async (req: AuthRequest, res) => {
       extracted.plate ? `Plaka ${extracted.plate}` : null,
       extracted.receiptNo ? `Fiş No ${extracted.receiptNo}` : null,
       date && time ? `${date.split("-").reverse().join(".")} ${time}` : null,
-      unitPrice != null
-        ? `Birim ${unitPrice.toFixed(2)} TL (${unitPriceSource === "po" ? "PO İpsala" : "fiş"})`
-        : null,
+      extracted.amount != null
+        ? `TOPLAM ${extracted.amount.toLocaleString("tr-TR", { minimumFractionDigits: 2 })} TL`
+        : unitPrice != null
+          ? `Birim ${unitPrice.toFixed(2)} TL (${unitPriceSource === "po" ? "PO İpsala" : "fiş"})`
+          : null,
     ].filter(Boolean);
 
     res.json({
@@ -177,12 +166,14 @@ router.post("/ocr-preview", uploadReceipt, async (req: AuthRequest, res) => {
         receiptAmount: extracted.amount,
         calculatedAmount,
         amount,
+        amountSource: extracted.amount != null ? "toplam" : calculatedAmount != null ? "litre_x_fiyat" : null,
         suggestedType,
         description: descParts.join(" · "),
         readable: Boolean(
           extracted.receiptNo ||
             extracted.liters ||
-            extracted.dateTime ||
+            extracted.date ||
+            extracted.time ||
             extracted.amount ||
             fuelKind !== "UNKNOWN"
         ),

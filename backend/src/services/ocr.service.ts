@@ -9,9 +9,16 @@ export type FuelKind = "MOTORIN" | "BENZIN" | "LPG" | "UNKNOWN";
 export type ReceiptExtraction = {
   amount: number | null;
   dateTime: Date | null;
+  /** YYYY-MM-DD (kırmızı alan) */
+  date: string | null;
+  /** HH:mm (turuncu alan) */
+  time: string | null;
   text: string;
+  /** Fiş no (mavi alan) */
   receiptNo: string | null;
+  /** Litre (yeşil alan) */
   liters: number | null;
+  /** MOT.VMAX / benzin / otogaz (litrenin altı) */
   fuelKind: FuelKind;
   plate: string | null;
   unitPrice: number | null;
@@ -25,34 +32,75 @@ export function isSuspiciousStatus(status: SuspicionStatus): boolean {
   );
 }
 
-/** Fiş metninden olası tutarları çıkarır */
+/** Türkçe para: 1.000,00 | *1.000,00 | 42,44 | 1000.00 */
+export function parseTrMoney(raw: string): number | null {
+  const s = raw.replace(/\s/g, "").replace(/^[*\-–—]+/, "");
+  if (!s) return null;
+
+  // 1.000,00 veya 12.345,67
+  if (/^\d{1,3}(\.\d{3})+,\d{2}$/.test(s)) {
+    const n = parseFloat(s.replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+  // 1000,00 veya 42,44
+  if (/^\d+,\d{2}$/.test(s)) {
+    const n = parseFloat(s.replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+  // 1000.00
+  if (/^\d+\.\d{2}$/.test(s)) {
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  // 1000
+  if (/^\d+$/.test(s)) {
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+const MONEY_CAPTURE = "(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+[.,]\\d{2}|\\d{2,6})";
+
+/**
+ * Sarı alan — TOPLAM tutarı.
+ * Örn: TOPLAM *1.000,00 · TOPLAM: 1.000,00 · NAKİT *1.000,00
+ */
 export function parseAmountFromText(text: string): number | null {
   const normalized = text.replace(/\s+/g, " ");
 
   const priorityPatterns = [
-    /(?:TOPLAM|TUTAR|TOP|AMOUNT|GENEL\s*TOPLAM)[:\s*]*(\d{1,6}[.,]\d{2})/gi,
-    /(\d{1,6}[.,]\d{2})\s*(?:TL|₺)/gi,
+    new RegExp(`(?:TOPLAM|GENEL\\s*TOPLAM)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`, "gi"),
+    new RegExp(`(?:NAKIT|NAKİT|NAKİT)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`, "gi"),
+    new RegExp(`(?:TUTAR|AMOUNT)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`, "gi"),
   ];
 
   for (const pattern of priorityPatterns) {
     const matches = [...normalized.matchAll(pattern)];
-    if (matches.length > 0) {
-      const last = matches[matches.length - 1][1];
-      return parseFloat(last.replace(",", "."));
+    if (matches.length === 0) continue;
+    // TOPLAM satırını tercih et; birden fazlaysa son anlamlı olan
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const n = parseTrMoney(matches[i][1]);
+      if (n !== null && n > 0 && n < 500000) return n;
     }
   }
 
-  const amounts = [...normalized.matchAll(/(\d{1,6}[.,]\d{2})/g)]
-    .map((m) => parseFloat(m[1].replace(",", ".")))
-    .filter((n) => n > 0 && n < 100000);
+  // Yedek: satırda yalnız başına büyük tutar
+  const loose = [...normalized.matchAll(new RegExp(`\\*?${MONEY_CAPTURE}`, "g"))]
+    .map((m) => parseTrMoney(m[1]))
+    .filter((n): n is number => n !== null && n >= 20 && n < 500000);
 
-  if (amounts.length === 0) return null;
-  return Math.max(...amounts);
+  if (loose.length === 0) return null;
+  return Math.max(...loose);
 }
 
 function normalizeYear(year: number): number {
   if (year < 100) return 2000 + year;
   return year;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
 function buildIstanbulDateTime(
@@ -66,7 +114,7 @@ function buildIstanbulDateTime(
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
 
   const y = normalizeYear(year);
-  const iso = `${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+03:00`;
+  const iso = `${y}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${pad2(minute)}:00+03:00`;
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? null : date;
 }
@@ -74,17 +122,46 @@ function buildIstanbulDateTime(
 type DateParts = { day: number; month: number; year: number };
 type TimeParts = { hour: number; minute: number };
 
-function parseDateParts(text: string): DateParts | null {
+/**
+ * Kırmızı alan — tarih.
+ * Petrol Ofisi: 03-02-2024 (FİŞ NO satırının üstü)
+ */
+export function parseDateParts(text: string): DateParts | null {
+  const normalized = text.replace(/\s+/g, " ");
+
+  // Fiş no civarındaki tarihi önceliklendir
+  const nearFis = normalized.match(
+    /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})[^\n]{0,40}F[Iİıi]?[SŞşs]\s*NO/i
+  );
+  if (nearFis) {
+    return {
+      day: parseInt(nearFis[1], 10),
+      month: parseInt(nearFis[2], 10),
+      year: parseInt(nearFis[3], 10),
+    };
+  }
+
+  const fisNearDate = normalized.match(
+    /F[Iİıi]?[SŞşs]\s*NO[^\n]{0,20}(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/i
+  );
+  if (fisNearDate) {
+    return {
+      day: parseInt(fisNearDate[1], 10),
+      month: parseInt(fisNearDate[2], 10),
+      year: parseInt(fisNearDate[3], 10),
+    };
+  }
+
   const patterns = [
     /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/g,
     /(\d{4})[./-](\d{1,2})[./-](\d{1,2})/g,
   ];
 
   for (const pattern of patterns) {
-    const matches = [...text.matchAll(pattern)];
+    const matches = [...normalized.matchAll(pattern)];
     if (matches.length === 0) continue;
 
-    const m = matches[matches.length - 1];
+    const m = matches[0]; // fişte ilk tarih genelde işlem tarihi
     if (pattern.source.startsWith("(\\d{4})")) {
       return {
         year: parseInt(m[1], 10),
@@ -102,17 +179,33 @@ function parseDateParts(text: string): DateParts | null {
   return null;
 }
 
-function parseTimeParts(text: string): TimeParts | null {
+/**
+ * Turuncu alan — saat.
+ * Petrol Ofisi: tarih satırının sağında 17:47
+ */
+export function parseTimeParts(text: string): TimeParts | null {
+  const normalized = text.replace(/\s+/g, " ");
+
+  const nearDate = normalized.match(
+    /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\s+(\d{1,2})[:.](\d{2})/
+  );
+  if (nearDate) {
+    const hour = parseInt(nearDate[4], 10);
+    const minute = parseInt(nearDate[5], 10);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      return { hour, minute };
+    }
+  }
+
   const patterns = [
-    /(?:SAAT|TAR[İI]H\s*\/\s*SAAT|TIME)[:\s]*(\d{1,2})[:.](\d{2})/gi,
-    /\b(\d{1,2})[:.](\d{2})(?::(\d{2}))?\b/g,
+    /(?:SAAT|TIME)[:\s]*(\d{1,2})[:.](\d{2})/gi,
+    /\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/g,
   ];
 
   for (const pattern of patterns) {
-    const matches = [...text.matchAll(pattern)];
+    const matches = [...normalized.matchAll(pattern)];
     if (matches.length === 0) continue;
-
-    const m = matches[matches.length - 1];
+    const m = matches[0];
     const hour = parseInt(m[1], 10);
     const minute = parseInt(m[2], 10);
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
@@ -123,50 +216,18 @@ function parseTimeParts(text: string): TimeParts | null {
   return null;
 }
 
+export function formatDateField(parts: DateParts): string {
+  return `${normalizeYear(parts.year)}-${pad2(parts.month)}-${pad2(parts.day)}`;
+}
+
+export function formatTimeField(parts: TimeParts): string {
+  return `${pad2(parts.hour)}:${pad2(parts.minute)}`;
+}
+
 /** Fiş metninden tarih + saat çıkarır */
 export function parseDateTimeFromText(text: string): Date | null {
-  const normalized = text.replace(/\s+/g, " ").trim();
-
-  const combinedPatterns = [
-    /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\s+(\d{1,2})[:.](\d{2})/g,
-    /(\d{1,2})[:.](\d{2})\s+(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/g,
-    /(\d{4})[./-](\d{1,2})[./-](\d{1,2})\s+(\d{1,2})[:.](\d{2})/g,
-  ];
-
-  for (const pattern of combinedPatterns) {
-    const matches = [...normalized.matchAll(pattern)];
-    if (matches.length === 0) continue;
-
-    const m = matches[matches.length - 1];
-    if (pattern.source.startsWith("(\\d{4})")) {
-      return buildIstanbulDateTime(
-        parseInt(m[3], 10),
-        parseInt(m[2], 10),
-        parseInt(m[1], 10),
-        parseInt(m[4], 10),
-        parseInt(m[5], 10)
-      );
-    }
-    if (pattern.source.startsWith("(\\d{1,2})[:.]")) {
-      return buildIstanbulDateTime(
-        parseInt(m[3], 10),
-        parseInt(m[4], 10),
-        parseInt(m[5], 10),
-        parseInt(m[1], 10),
-        parseInt(m[2], 10)
-      );
-    }
-    return buildIstanbulDateTime(
-      parseInt(m[1], 10),
-      parseInt(m[2], 10),
-      parseInt(m[3], 10),
-      parseInt(m[4], 10),
-      parseInt(m[5], 10)
-    );
-  }
-
-  const dateParts = parseDateParts(normalized);
-  const timeParts = parseTimeParts(normalized);
+  const dateParts = parseDateParts(text);
+  const timeParts = parseTimeParts(text);
   if (!dateParts || !timeParts) return null;
 
   return buildIstanbulDateTime(
@@ -213,7 +274,7 @@ export function resolveReceiptDateTime(
   return buildIstanbulDateTime(day, month, year, timeParts.hour, timeParts.minute);
 }
 
-/** Fiş no — örn: FİŞ NO: 0222 */
+/** Mavi alan — Fiş no. Örn: FİŞ NO: 0222 */
 export function parseReceiptNoFromText(text: string): string | null {
   const patterns = [
     /F[Iİıi]?[SŞşs]\s*NO[:\s.]*([0-9]{1,8})/i,
@@ -227,12 +288,15 @@ export function parseReceiptNoFromText(text: string): string | null {
   return null;
 }
 
-/** Litre — örn: 23,560 LT · 34,56 LT */
+/**
+ * Yeşil alan — litre.
+ * Örn: 23,560 LT · 23,560 LT X 42,44
+ */
 export function parseLitersFromText(text: string): number | null {
   const normalized = text.replace(/\s+/g, " ");
   const patterns = [
     /(\d{1,4}[.,]\d{1,3})\s*(?:LT|LITRE)\b/gi,
-    /(\d{1,4}[.,]\d{1,3})\s*[xX*]\s*\d/gi,
+    /(\d{1,4}[.,]\d{1,3})\s*[xX×*]\s*\d/gi,
   ];
 
   for (const pattern of patterns) {
@@ -245,27 +309,33 @@ export function parseLitersFromText(text: string): number | null {
   return null;
 }
 
-/** Birim fiyat fişten — örn: 42,44 veya 43,400 */
+/** Birim fiyat — örn: 23,560 LT X 42,44 */
 export function parseUnitPriceFromText(text: string): number | null {
   const normalized = text.replace(/\s+/g, " ");
   const patterns = [
-    /(\d{1,4}[.,]\d{1,3})\s*(?:LT|LITRE)?\s*[xX*]\s*(\d{1,4}[.,]\d{1,3})/gi,
+    /(\d{1,4}[.,]\d{1,3})\s*(?:LT|LITRE)?\s*[xX×*]\s*(\d{1,4}[.,]\d{1,3})/gi,
     /(?:BIRIM|FIYAT|UNIT)[:\s]*(\d{1,4}[.,]\d{1,3})/gi,
   ];
 
   for (const pattern of patterns) {
     const matches = [...normalized.matchAll(pattern)];
     if (!matches.length) continue;
-    // "34,56 LT X 43,400" → group 2 is unit price
     const raw = (matches[0][2] || matches[0][1]).replace(",", ".");
     const n = parseFloat(raw);
-    if (Number.isFinite(n) && n > 5 && n < 200) return n;
+    if (Number.isFinite(n) && n > 5 && n < 300) return n;
   }
   return null;
 }
 
+/**
+ * Litrenin altındaki yakıt ibaresi.
+ * MOT.VMAX / V/MAX DIESEL → motorin
+ * KURSUNSUZ / BENZIN → benzin
+ * OTOGAZ / LPG → otogaz
+ */
 export function parseFuelKindFromText(text: string): FuelKind {
-  const t = text.toUpperCase()
+  const t = text
+    .toUpperCase()
     .replace(/İ/g, "I")
     .replace(/Ş/g, "S")
     .replace(/Ğ/g, "G")
@@ -273,19 +343,27 @@ export function parseFuelKindFromText(text: string): FuelKind {
     .replace(/Ö/g, "O")
     .replace(/Ç/g, "C");
 
+  // Motorin / VMax diesel
   if (
-    /V\s*\/?\s*MAX\s*DIESEL|MOT\.?\s*VMAX|MOTORIN|DIZEL|DIESEL|MAZOT/.test(t)
+    /MOT\.?\s*V\s*MAX|MOT\.?\s*VMAX|V\s*\/?\s*MAX\s*DIESEL|VMAX\s*DIESEL|MOTORIN|DIZEL|DIESEL|MAZOT/.test(
+      t
+    )
   ) {
     return "MOTORIN";
   }
+
+  // Benzin
   if (
-    /KURSUNSUZ|BENZIN|V\s*\/?\s*MAX.*95|VMAX\s*95|K95/.test(t)
+    /KURSUNSUZ|BENZIN|V\s*\/?\s*MAX.*95|VMAX\s*95|K95|95\s*OKTAN/.test(t)
   ) {
     return "BENZIN";
   }
-  if (/OTOG[AZ]|PO\s*\/?\s*GAZ|LPG/.test(t)) {
+
+  // Otogaz / LPG
+  if (/OTOG[AZ]|PO\s*\/?\s*GAZ|LPG|\bGAZ\b/.test(t) && !/MAZOT|DIESEL|MOTORIN/.test(t)) {
     return "LPG";
   }
+
   return "UNKNOWN";
 }
 
@@ -298,6 +376,8 @@ export function parsePlateFromText(text: string): string | null {
 export function fuelKindToTransactionType(kind: FuelKind): string | null {
   if (kind === "MOTORIN") return "FUEL_MOTORIN";
   if (kind === "BENZIN") return "FUEL_BENZIN";
+  // Otogaz için formda OTHER veya mevcut tip yoksa null — UI'da OTHER seçilebilir
+  if (kind === "LPG") return "OTHER";
   return null;
 }
 
@@ -305,6 +385,8 @@ function emptyExtraction(): ReceiptExtraction {
   return {
     amount: null,
     dateTime: null,
+    date: null,
+    time: null,
     text: "",
     receiptNo: null,
     liters: null,
@@ -329,14 +411,33 @@ function parseFromFilename(originalName: string): ReceiptExtraction {
         parseInt(dtMatch[5], 10)
       )
     : null;
+  if (base.dateTime) {
+    base.date = `${dtMatch![3]}-${dtMatch![2]}-${dtMatch![1]}`;
+    base.time = `${dtMatch![4]}:${dtMatch![5]}`;
+  }
 
   return base;
 }
 
 export function parseReceiptDetailsFromText(text: string): Omit<ReceiptExtraction, "text"> {
+  const dateParts = parseDateParts(text);
+  const timeParts = parseTimeParts(text);
+  const dateTime =
+    dateParts && timeParts
+      ? buildIstanbulDateTime(
+          dateParts.day,
+          dateParts.month,
+          dateParts.year,
+          timeParts.hour,
+          timeParts.minute
+        )
+      : null;
+
   return {
     amount: parseAmountFromText(text),
-    dateTime: parseDateTimeFromText(text),
+    dateTime,
+    date: dateParts ? formatDateField(dateParts) : null,
+    time: timeParts ? formatTimeField(timeParts) : null,
     receiptNo: parseReceiptNoFromText(text),
     liters: parseLitersFromText(text),
     fuelKind: parseFuelKindFromText(text),
@@ -360,6 +461,8 @@ export async function extractFromReceipt(
     return {
       amount: details.amount ?? fromName.amount,
       dateTime: details.dateTime ?? fromName.dateTime,
+      date: details.date ?? fromName.date,
+      time: details.time ?? fromName.time,
       text,
       receiptNo: details.receiptNo,
       liters: details.liters,

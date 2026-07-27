@@ -583,7 +583,7 @@ function showNewTransaction() {
         <option value="FUEL_BENZIN">Benzin</option>
         <option value="FUEL_MOTORIN">Motorin</option>
         <option value="CASH">Nakit</option>
-        <option value="OTHER">Diğer</option>
+        <option value="OTHER">Otogaz / Diğer</option>
       </select>
     </div>
     <div class="form-group credit-toggle-wrap" id="creditToggleWrap">
@@ -651,6 +651,7 @@ function showNewTransaction() {
   `;
   receiptFile = null;
   window.__ocrUnitPrice = null;
+  window.__ocrAmountSource = null;
   toggleSaleOptions();
   loadCreditCustomersForSale();
   loadVehiclesForSale();
@@ -669,6 +670,8 @@ function setOcrStatus(msg, kind = 'info') {
 }
 
 function recalcAmountFromLiters() {
+  // TOPLAM fişten geldiyse litre×fiyat ile ezme
+  if (window.__ocrAmountSource === 'toplam') return;
   const liters = parseFloat(document.getElementById('txLiters')?.value);
   const unit = window.__ocrUnitPrice;
   if (!liters || liters <= 0 || !unit) return;
@@ -683,6 +686,8 @@ function recalcAmountFromLiters() {
 
 function applyOcrExtraction(extraction, prices) {
   if (!extraction) return;
+
+  window.__ocrAmountSource = extraction.amountSource || null;
 
   if (extraction.suggestedType) {
     const typeEl = document.getElementById('txType');
@@ -716,24 +721,30 @@ function applyOcrExtraction(extraction, prices) {
     if (el) el.value = extraction.description;
   }
 
-  const parts = [];
-  if (extraction.fuelKind === 'MOTORIN') parts.push('Motorin algılandı');
-  if (extraction.fuelKind === 'BENZIN') parts.push('Benzin algılandı');
-  if (extraction.fuelKind === 'LPG') parts.push('Otogaz algılandı');
-  if (extraction.liters != null) parts.push(`${extraction.liters} lt`);
-  if (extraction.unitPrice != null) {
-    const src = extraction.unitPriceSource === 'po' ? 'PO İpsala' : 'fiş';
-    parts.push(`@ ${extraction.unitPrice.toFixed(2)} TL (${src})`);
+  const hint = document.getElementById('txAmountHint');
+  if (hint) {
+    if (extraction.amountSource === 'toplam' && extraction.amount != null) {
+      hint.textContent = `Fiş TOPLAM: ${fmt(extraction.amount)} (sarı alan)`;
+    } else if (extraction.liters != null && extraction.unitPrice != null) {
+      hint.textContent = `${extraction.liters.toLocaleString('tr-TR')} lt × ${extraction.unitPrice.toFixed(2)} TL`;
+    }
   }
-  if (extraction.calculatedAmount != null) parts.push(`= ${fmt(extraction.calculatedAmount)}`);
+
+  const parts = [];
+  if (extraction.receiptNo) parts.push(`Fiş No ${extraction.receiptNo}`);
+  if (extraction.date) parts.push(extraction.date.split('-').reverse().join('.'));
+  if (extraction.time) parts.push(extraction.time);
+  if (extraction.fuelKind === 'MOTORIN') parts.push('Motorin');
+  if (extraction.fuelKind === 'BENZIN') parts.push('Benzin');
+  if (extraction.fuelKind === 'LPG') parts.push('Otogaz');
+  if (extraction.liters != null) parts.push(`${extraction.liters} lt`);
+  if (extraction.amount != null) parts.push(`TOPLAM ${fmt(extraction.amount)}`);
   if (!extraction.readable) {
     setOcrStatus('Fiş okunamadı — alanları elle doldurun', 'warn');
-  } else if (!prices && extraction.unitPriceSource !== 'po') {
-    setOcrStatus((parts.join(' · ') || 'Kısmen okundu') + ' — PO fiyatı yok, fiş birim fiyatı kullanıldı', 'warn');
   } else {
     setOcrStatus('Fiş okundu: ' + (parts.join(' · ') || 'alanlar dolduruldu'), 'ok');
   }
-  recalcAmountFromLiters();
+  if (extraction.amountSource !== 'toplam') recalcAmountFromLiters();
 }
 
 async function runReceiptOcr(file) {
