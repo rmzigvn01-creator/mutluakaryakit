@@ -585,20 +585,18 @@ async function showNewTransaction() {
     }
   }
 
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  // Europe/Istanbul yaklaşık: tarayıcı yerel saati (TR)
+  const defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
   setHeaderTitle('Yeni İşlem');
   document.getElementById('mainContent').innerHTML = `
     ${pageHeader('Yeni İşlem Kaydı')}
-    <div class="form-group">
-      <label>Fiş Fotoğrafı *</label>
-      <div class="receipt-upload" id="receiptUploadBox" onclick="document.getElementById('receiptInput').click()">
-        <div class="icon">📷</div>
-        <p>Fiş fotoğrafı çek veya seç — alanlar otomatik dolacak</p>
-        <input type="file" id="receiptInput" accept="image/*,.heic,.heif" capture="environment"
-          onchange="previewReceipt(this)">
-      </div>
-      <img id="receiptPreview" class="receipt-preview hidden" alt="Fiş">
-      <div id="ocrStatus" class="ocr-status hidden"></div>
-    </div>
+    <p class="credit-hint" style="margin-bottom:14px">
+      Tutar ve bilgileri siz girin. Fiş fotoğrafı zorunlu — sistem kayıttan sonra fişi okuyup uyuşmazlıkta şüpheliye düşürür.
+    </p>
     <div class="form-group">
       <label>İşlem Tipi</label>
       <select id="txType">
@@ -644,37 +642,49 @@ async function showNewTransaction() {
     <div class="form-row-2">
       <div class="form-group">
         <label>Fiş No</label>
-        <input type="text" id="txReceiptNo" placeholder="Otomatik">
+        <input type="text" id="txReceiptNo" placeholder="Örn: 0222" inputmode="numeric">
       </div>
       <div class="form-group">
         <label>Litre</label>
-        <input type="number" id="txLiters" placeholder="0.000" step="0.001" min="0" oninput="recalcAmountFromLiters()">
+        <input type="number" id="txLiters" placeholder="0.000" step="0.001" min="0">
       </div>
     </div>
     <div class="form-row-2">
       <div class="form-group">
         <label>Tarih</label>
-        <input type="date" id="txDate">
+        <input type="date" id="txDate" value="${defaultDate}">
       </div>
       <div class="form-group">
         <label>Saat</label>
-        <input type="time" id="txTime">
+        <input type="time" id="txTime" value="${defaultTime}">
       </div>
     </div>
     <div class="form-group">
       <label>Tutar (TL) *</label>
       <input type="number" id="txAmount" placeholder="0.00" step="0.01" min="0">
-      <p class="credit-hint" id="txAmountHint">Litre × güncel PO İpsala fiyatı (KDV dahil)</p>
+      <p class="credit-hint" id="txAmountHint">Fişteki TOPLAM tutarı girin</p>
     </div>
     <div class="form-group">
       <label>Açıklama</label>
       <input type="text" id="txDesc" placeholder="Örn: Motorin 40 lt · Plaka 34 ABC">
+    </div>
+    <div class="form-group">
+      <label>Fiş Fotoğrafı *</label>
+      <div class="receipt-upload" id="receiptUploadBox" onclick="document.getElementById('receiptInput').click()">
+        <div class="icon">📷</div>
+        <p>Fiş fotoğrafı çekin veya seçin (zorunlu)</p>
+        <input type="file" id="receiptInput" accept="image/*,.heic,.heif" capture="environment"
+          onchange="previewReceipt(this)">
+      </div>
+      <img id="receiptPreview" class="receipt-preview hidden" alt="Fiş">
+      <div id="ocrStatus" class="ocr-status hidden"></div>
     </div>
     <button class="btn btn-primary" onclick="saveTransaction()" id="saveBtn">Kaydet</button>
   `;
   receiptFile = null;
   window.__ocrUnitPrice = null;
   window.__ocrAmountSource = null;
+  ocrBusy = false;
   toggleSaleOptions();
   loadCreditCustomersForSale();
   loadVehiclesForSale();
@@ -881,7 +891,7 @@ async function previewReceipt(input) {
     toast('Önizleme yok — kayıt sırasında dönüştürülecek');
   }
 
-  await runReceiptOcr(receiptFile);
+  setOcrStatus('Fiş eklendi — kayıttan sonra sistem kontrol edecek', 'ok');
 }
 
 async function saveTransaction() {
@@ -906,7 +916,6 @@ async function saveTransaction() {
   const txDate = document.getElementById('txDate')?.value;
   const txTime = document.getElementById('txTime')?.value;
 
-  if (ocrBusy) return toast('Fiş hâlâ okunuyor — biraz bekleyin');
   if (!amount || amount <= 0) return toast('Geçerli tutar girin');
   if (!receiptFile) return toast('Fiş fotoğrafı zorunludur');
   if (isCredit && !customerId) return toast('Veresiye için müşteri seçin');
@@ -917,12 +926,14 @@ async function saveTransaction() {
     const bits = [];
     if (type === 'FUEL_MOTORIN' && liters) bits.push(`Motorin ${liters} lt`);
     if (type === 'FUEL_BENZIN' && liters) bits.push(`Benzin ${liters} lt`);
+    if (type === 'OTHER' && liters) bits.push(`Otogaz ${liters} lt`);
     if (receiptNo) bits.push(`Fiş No ${receiptNo}`);
     if (txDate && txTime) bits.push(`${txDate.split('-').reverse().join('.')} ${txTime}`);
     desc = bits.join(' · ');
   }
 
   document.getElementById('saveBtn').disabled = true;
+  setOcrStatus('Kaydediliyor — fiş kontrol ediliyor…', 'info');
 
   const clientId = crypto.randomUUID();
   let createdAt = new Date().toISOString();
