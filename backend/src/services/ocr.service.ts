@@ -100,13 +100,18 @@ export function refineReceiptAmount(
 ): number | null {
   const computed = amountFromLitersAndPrice(liters, unitPrice);
 
-  // Yakıt fişlerinde LT × birim fiyat en güvenilir kaynak
-  if (computed != null) {
-    if (amount == null) return computed;
-    if (Math.abs(amount - computed) <= 1) return computed;
-    if (Math.abs(amount / 100 - computed) <= 1) return computed;
+  if (computed != null && amount != null) {
+    // TOPLAM ≈ LT×fiyat → fişteki TOPLAM'ı koru (yuvarlama farkı)
+    if (Math.abs(amount - computed) <= 2) return Math.round(amount * 100) / 100;
+    // 430974 gibi virgöl kaybı
+    if (Math.abs(amount / 100 - computed) <= 2) {
+      return Math.round((amount / 100) * 100) / 100;
+    }
+    // TOPLAM tamamen yanlış → LT×fiyat
     return computed;
   }
+
+  if (computed != null) return computed;
 
   if (amount != null && amount >= 10000 && Number.isInteger(amount)) {
     return amount / 100;
