@@ -82,6 +82,17 @@ function istanbulDateKey(d) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date(d));
 }
 
+function istanbulDateParts(d) {
+  const dt = new Date(d);
+  const date = new Intl.DateTimeFormat('tr-TR', {
+    timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(dt);
+  const time = new Intl.DateTimeFormat('tr-TR', {
+    timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit',
+  }).format(dt);
+  return { date, time, label: `${date} ${time}` };
+}
+
 function formatDurationMinutes(minutes) {
   const abs = Math.round(Math.abs(minutes));
   if (abs < 60) return `${abs} dk`;
@@ -98,28 +109,70 @@ function getDateTimeMismatch(createdAt, receiptDateTime) {
   const diffMin = (created.getTime() - receipt.getTime()) / 60000;
   if (sameDay && Math.abs(diffMin) <= OCR_TIME_TOLERANCE_MIN) return null;
 
+  const createdParts = istanbulDateParts(createdAt);
+  const receiptParts = istanbulDateParts(receiptDateTime);
+  const dayDiff = Math.round(
+    (Date.parse(istanbulDateKey(created) + 'T00:00:00Z') -
+      Date.parse(istanbulDateKey(receipt) + 'T00:00:00Z')) / 86400000
+  );
+  let reason;
+  if (sameDay) {
+    const ahead = diffMin > 0;
+    reason = ahead
+      ? `Aynı gün · kayıt fişten ${formatDurationMinutes(diffMin)} sonra`
+      : `Aynı gün · kayıt fişten ${formatDurationMinutes(diffMin)} önce`;
+  } else {
+    const absDays = Math.abs(dayDiff);
+    const dayWord = absDays === 1 ? '1 gün' : `${absDays} gün`;
+    reason = dayDiff > 0
+      ? `Farklı gün · kayıt fişten ${dayWord} sonra`
+      : `Farklı gün · kayıt fişten ${dayWord} önce`;
+  }
+
   return {
-    createdLabel: fmtDate(createdAt),
-    receiptLabel: fmtDate(receiptDateTime),
-    reason: sameDay
-      ? formatDurationMinutes(diffMin)
-      : `farklı gün (${created.toLocaleDateString('tr-TR')} ≠ ${receipt.toLocaleDateString('tr-TR')})`,
+    createdLabel: createdParts.label,
+    receiptLabel: receiptParts.label,
+    createdDate: createdParts.date,
+    createdTime: createdParts.time,
+    receiptDate: receiptParts.date,
+    receiptTime: receiptParts.time,
+    reason,
   };
+}
+
+function renderDateTimeMismatchBox(mismatch) {
+  return `<div class="tx-mismatch-box" role="alert">
+    <div class="tx-mismatch-title">Tarih / saat uyuşmuyor</div>
+    <div class="tx-mismatch-compare">
+      <div class="tx-mismatch-side">
+        <span class="tx-mismatch-lbl">Sistem kaydı</span>
+        <strong class="tx-mismatch-date">${mismatch.createdDate}</strong>
+        <span class="tx-mismatch-time">${mismatch.createdTime}</span>
+      </div>
+      <div class="tx-mismatch-vs" aria-hidden="true">≠</div>
+      <div class="tx-mismatch-side">
+        <span class="tx-mismatch-lbl">Fişteki</span>
+        <strong class="tx-mismatch-date">${mismatch.receiptDate}</strong>
+        <span class="tx-mismatch-time">${mismatch.receiptTime}</span>
+      </div>
+    </div>
+    <div class="tx-mismatch-diff">${mismatch.reason}</div>
+  </div>`;
 }
 
 function renderDateTimeMismatchHtml(createdAt, receiptDateTime) {
   const mismatch = getDateTimeMismatch(createdAt, receiptDateTime);
   if (!mismatch) {
-    return `<br><span class="tx-datetime-ok">Fiş saati: ${fmtDate(receiptDateTime)}</span>`;
+    return `<div class="tx-datetime-ok-line">Fiş saati: ${fmtDate(receiptDateTime)}</div>`;
   }
-  return `<br><span class="tx-datetime-warn">⚠ Tarih/saat uyuşmuyor · Kayıt: ${mismatch.createdLabel} · Fiş: ${mismatch.receiptLabel} · Fark: ${mismatch.reason}</span>`;
+  return renderDateTimeMismatchBox(mismatch);
 }
 
 function renderDetailDateTimeRow(t) {
   if (!isAdmin() || !t.receiptDateTime) return '';
   const mm = getDateTimeMismatch(t.createdAt, t.receiptDateTime);
   if (mm) {
-    return `<div class="detail-row detail-warn"><span>Tarih/saat</span><strong>⚠ Uyuşmuyor · Kayıt: ${mm.createdLabel} · Fiş: ${mm.receiptLabel} · Fark: ${mm.reason}</strong></div>`;
+    return `<div class="detail-datetime-wrap">${renderDateTimeMismatchBox(mm)}</div>`;
   }
   return `<div class="detail-row"><span>Fiş tarih/saat</span><strong>${fmtDate(t.receiptDateTime)}</strong></div>`;
 }
@@ -1245,9 +1298,10 @@ async function showSuspicious() {
         <div class="tx-amount">${fmt(t.enteredAmount)} — ${TYPE_LABELS[t.type]}</div>
         <div class="tx-meta">
           Pompacı: ${t.createdBy?.name || '?'} · ${fmtDate(t.createdAt)}<br>
-          ${amountWarn}${dateTimeWarn}${otherWarn ? '<br>' + otherWarn : ''}
+          ${amountWarn}${otherWarn ? '<br>' + otherWarn : ''}
           ${t.description ? '<br>' + t.description : ''}
         </div>
+        ${dateTimeWarn}
         <div class="tx-actions">
           <button class="btn btn-sm btn-primary" onclick="showReceiptViewer('${t.id}')">Fiş Gör</button>
           <button class="btn btn-sm btn-warning" onclick="openReviewSuspiciousModal('${t.id}')">İncelendi</button>
