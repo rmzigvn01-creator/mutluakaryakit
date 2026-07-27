@@ -925,24 +925,25 @@ body {
       radial-gradient(ellipse at top, #fafafa 0%, var(--po-bg) 55%);
   }
 
-  /* Giriş: sol marka / sağ form — boş kırmızı alan hissini kaldır */
+  /* Giriş: marka + form yan yana, ortalanmış (kenara yapışmaz) */
   .login-screen {
     flex-direction: row;
-    align-items: stretch;
-    justify-content: stretch;
-    padding: 0;
-    gap: 0;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    padding: 48px 40px 64px;
+    gap: 56px 72px;
     position: relative;
   }
 
   .login-top-brand {
-    flex: 1.1;
+    flex: 0 1 380px;
     margin: 0;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     justify-content: center;
-    padding: 48px 56px;
+    padding: 0;
     text-align: left;
   }
 
@@ -964,23 +965,22 @@ body {
   .login-top-brand .po-dealer-name {
     font-size: 42px;
     line-height: 1.15;
-    max-width: 12ch;
+    max-width: 14ch;
   }
 
   .login-box {
-    flex: 0 0 440px;
-    max-width: none;
-    width: 440px;
-    margin: 40px 48px 40px 0;
-    align-self: center;
+    flex: 0 1 440px;
+    max-width: 440px;
+    width: 100%;
+    margin: 0;
     padding: 40px 36px;
     border-radius: 18px;
   }
 
   .login-footer {
     position: absolute;
-    left: 56px;
-    bottom: 28px;
+    left: 40px;
+    bottom: 24px;
     margin: 0;
     text-align: left;
   }
@@ -1092,13 +1092,14 @@ body {
     gap: 20px;
   }
 
-  .login-box {
-    flex-basis: 480px;
-    width: 480px;
+  .login-screen {
+    gap: 80px 96px;
+    padding: 56px 64px 72px;
   }
 
-  .login-top-brand {
-    padding: 56px 72px;
+  .login-box {
+    flex-basis: 460px;
+    max-width: 460px;
   }
 
   .login-top-brand .po-dealer-name { font-size: 48px; }
