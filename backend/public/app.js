@@ -568,6 +568,7 @@ async function showHome() {
 
   if (isAdmin) {
     html += menuCard('📊', 'Yönetici Paneli', 'Günlük özet ve istatistikler', 'showDashboard()');
+    html += menuCard('👤', 'Üyeler', 'Pompacı / muhasebeci ekle', 'showUsers()');
     html += menuCard('📒', 'Veresiye', 'Müşteri borçları ve tahsilat', 'showCreditCustomers()');
     html += menuCard('🚗', 'Şirket Araçları', 'Araç yakıt takibi', 'showVehicles()');
     html += menuCard('🌾', 'Mutlu Tarım Harcamalar', 'Tedarikçi borçları ve ödemeler', 'showExpenseSuppliers()');
@@ -1301,6 +1302,7 @@ async function showDashboard() {
         <div class="stat-card"><div class="label">Onay Bekleyen</div><div class="value">${d.pendingCorrections}</div></div>
       </div>
       <div class="menu-grid">
+        ${menuCard('👤','Üyeler','Pompacı / muhasebeci ekle','showUsers()')}
         ${menuCard('📒','Veresiye','Müşteri borç / tahsilat','showCreditCustomers()')}
         ${menuCard('🚗','Şirket Araçları','Araç yakıt takibi','showVehicles()')}
         ${menuCard('🌾','Mutlu Tarım Harcamalar','Tedarikçi borç / ödeme','showExpenseSuppliers()')}
@@ -1313,6 +1315,132 @@ async function showDashboard() {
   } catch (e) {
     document.getElementById('dashContent').innerHTML = `<p class="empty">${e.message}</p>`;
   }
+}
+
+// ===== USERS / ÜYELER (ADMIN) =====
+let usersCache = [];
+
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function showUsers() {
+  if (!isAdmin()) return toast('Bu menü yalnızca yönetici içindir');
+  setHeaderTitle('Üyeler');
+  document.getElementById('mainContent').innerHTML =
+    pageHeader('Üyeler', 'showDashboard()') + `
+    <div class="day-close-toolbar">
+      <p class="credit-hint" style="margin:0;flex:1">Pompacı, muhasebeci veya yönetici hesabı ekleyin.</p>
+      <button class="btn btn-primary" onclick="openUserModal()">+ Üye Ekle</button>
+    </div>
+    <div id="usersList"><p class="empty">Yükleniyor...</p></div>`;
+
+  try {
+    const data = await api('GET', '/admin/users');
+    usersCache = data.users || [];
+    const list = document.getElementById('usersList');
+    if (!usersCache.length) {
+      list.innerHTML = '<p class="empty">Henüz üye yok — “+ Üye Ekle” ile başlayın</p>';
+      return;
+    }
+    list.innerHTML = usersCache.map(u => {
+      const self = u.id === currentUser.id;
+      return `
+      <div class="tx-item${!u.isActive ? ' suspicious' : ''}">
+        <div class="tx-header">
+          <div>
+            <div class="tx-amount">${escHtml(u.name)}${self ? ' <span style="font-size:12px;font-weight:600;color:var(--po-gray-light)">(siz)</span>' : ''}</div>
+            <div class="tx-type">${escHtml(u.email)}</div>
+          </div>
+          <span class="tx-badge ${u.isActive ? 'normal' : 'suspicious'}">${u.isActive ? (ROLE_LABELS[u.role] || u.role) : 'Pasif'}</span>
+        </div>
+        <div class="tx-meta">
+          Rol: <strong>${ROLE_LABELS[u.role] || u.role}</strong>
+          · Kayıt: ${fmtDate(u.createdAt)}
+        </div>
+        <div class="tx-actions">
+          <button class="btn btn-sm btn-secondary" onclick="openUserModalById('${u.id}')">Düzenle</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('usersList').innerHTML = `<p class="empty">${e.message}</p>`;
+  }
+}
+
+function openUserModalById(id) {
+  const user = usersCache.find(u => u.id === id);
+  if (!user) return toast('Üye bulunamadı');
+  openUserModal(user);
+}
+
+function openUserModal(user = null) {
+  const isEdit = Boolean(user);
+  openModal(isEdit ? 'Üye Düzenle' : 'Yeni Üye', `
+    <div class="form-group">
+      <label>Ad Soyad *</label>
+      <input type="text" id="userName" value="${escHtml(user?.name || '')}" placeholder="Örn: Ali Yılmaz" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>E-posta *</label>
+      <input type="email" id="userEmail" value="${escHtml(user?.email || '')}" placeholder="ornek@mutluakaryakit.local"
+        ${isEdit ? 'disabled' : ''} autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Rol *</label>
+      <select id="userRole">
+        <option value="STAFF" ${!user || user.role === 'STAFF' ? 'selected' : ''}>Pompacı</option>
+        <option value="ACCOUNTANT" ${user?.role === 'ACCOUNTANT' ? 'selected' : ''}>Muhasebeci</option>
+        <option value="ADMIN" ${user?.role === 'ADMIN' ? 'selected' : ''}>Yönetici</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>${isEdit ? 'Yeni şifre (boş bırakırsanız değişmez)' : 'Şifre *'}</label>
+      <input type="password" id="userPassword" placeholder="${isEdit ? '••••••••' : 'En az 6 karakter'}" autocomplete="new-password">
+    </div>
+    ${isEdit ? `
+    <div class="form-group">
+      <label>Durum</label>
+      <select id="userActive" ${user.id === currentUser.id ? 'disabled' : ''}>
+        <option value="true" ${user.isActive ? 'selected' : ''}>Aktif</option>
+        <option value="false" ${!user.isActive ? 'selected' : ''}>Pasif</option>
+      </select>
+      ${user.id === currentUser.id ? '<p class="credit-hint">Kendi hesabınızı pasifleştiremezsiniz.</p>' : ''}
+    </div>` : ''}
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">İptal</button>
+    <button class="btn btn-primary" onclick="${isEdit ? `saveUser('${user.id}')` : 'saveUser()'}">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
+  `);
+}
+
+async function saveUser(id) {
+  const name = document.getElementById('userName').value.trim();
+  const role = document.getElementById('userRole').value;
+  const password = document.getElementById('userPassword').value;
+  if (!name) return toast('Ad soyad zorunlu');
+
+  try {
+    if (id) {
+      const body = { name, role };
+      const activeEl = document.getElementById('userActive');
+      if (activeEl && !activeEl.disabled) body.isActive = activeEl.value === 'true';
+      if (password) body.password = password;
+      await api('PATCH', `/admin/users/${id}`, body);
+      toast('Üye güncellendi');
+    } else {
+      const email = document.getElementById('userEmail').value.trim();
+      if (!email) return toast('E-posta zorunlu');
+      if (!password || password.length < 6) return toast('Şifre en az 6 karakter olmalı');
+      await api('POST', '/admin/users', { name, email, password, role });
+      toast('Üye eklendi');
+    }
+    closeModal();
+    showUsers();
+  } catch (e) { toast(e.message); }
 }
 
 // ===== SUSPICIOUS =====

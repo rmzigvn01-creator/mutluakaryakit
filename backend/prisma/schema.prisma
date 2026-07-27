@@ -189,6 +189,7 @@ model User {
   passwordHash         String
   name                 String
   role                 UserRole
+  isActive             Boolean             @default(true)
   stationId            String
   station              Station             @relation(fields: [stationId], references: [id])
   createdAt            DateTime            @default(now())
@@ -200,6 +201,8 @@ model User {
   shifts               Shift[]
   pushDevices          PushDevice[]
   appNotifications     AppNotification[]
+
+  @@index([stationId, role, isActive])
 }
 
 model Transaction {

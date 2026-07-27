@@ -23,6 +23,11 @@ router.post("/login", async (req, res) => {
     return;
   }
 
+  if (!user.isActive) {
+    res.status(403).json({ error: "Bu hesap pasif. Yöneticiyle iletişime geçin." });
+    return;
+  }
+
   const token = signToken({
     userId: user.id,
     role: user.role,
