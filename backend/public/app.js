@@ -455,7 +455,11 @@ async function showHome() {
     <div class="menu-grid">`;
 
   if (isStaff || isAdmin) {
-    html += menuCard('⛽', 'Yeni İşlem', 'Fiş fotoğrafı zorunlu', 'showNewTransaction()');
+    if (isStaff && !shiftData.shift) {
+      html += menuCard('⛽', 'Yeni İşlem', 'Önce vardiya başlatın', 'requireShiftThenNewTx()');
+    } else {
+      html += menuCard('⛽', 'Yeni İşlem', 'Fiş fotoğrafı zorunlu', 'showNewTransaction()');
+    }
   }
   html += menuCard('🧾', 'İşlem Listesi', 'Tüm satış ve ödeme kayıtları', 'showTransactions()');
   html += menuCard('⏱', 'Vardiya Raporları', 'Pompacı vardiya geçmişi', 'showShifts()');
@@ -561,7 +565,26 @@ let receiptFile = null;
 let creditCustomersCache = [];
 let ocrBusy = false;
 
-function showNewTransaction() {
+async function requireShiftThenNewTx() {
+  await loadCurrentShift();
+  if (currentUser.role === 'STAFF' && !currentShift) {
+    toast('Yeni işlem için önce vardiya başlatın');
+    showHome();
+    return;
+  }
+  showNewTransaction();
+}
+
+async function showNewTransaction() {
+  if (currentUser.role === 'STAFF') {
+    await loadCurrentShift();
+    if (!currentShift) {
+      toast('Yeni işlem için önce vardiya başlatın');
+      showHome();
+      return;
+    }
+  }
+
   setHeaderTitle('Yeni İşlem');
   document.getElementById('mainContent').innerHTML = `
     ${pageHeader('Yeni İşlem Kaydı')}
@@ -862,6 +885,15 @@ async function previewReceipt(input) {
 }
 
 async function saveTransaction() {
+  if (currentUser.role === 'STAFF') {
+    await loadCurrentShift();
+    if (!currentShift) {
+      toast('Yeni işlem için önce vardiya başlatın');
+      showHome();
+      return;
+    }
+  }
+
   const type = document.getElementById('txType').value;
   const amount = parseFloat(document.getElementById('txAmount').value);
   let desc = document.getElementById('txDesc').value.trim();
@@ -900,6 +932,11 @@ async function saveTransaction() {
   }
 
   if (!navigator.onLine) {
+    if (currentUser.role === 'STAFF' && !currentShift) {
+      document.getElementById('saveBtn').disabled = false;
+      toast('Offline kayıt için de açık vardiya gerekir');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const queue = getQueue();
@@ -942,7 +979,6 @@ async function saveTransaction() {
     } else {
       toast('İşlem kaydedildi');
     }
-    if (data.shiftWarning) toast(data.shiftWarning);
     showHome();
   } catch (e) {
     toast(e.message || 'Bağlantı hatası — sunucu çalışıyor mu?');

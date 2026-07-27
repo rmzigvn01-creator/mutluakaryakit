@@ -245,6 +245,22 @@ router.post("/", uploadReceipt, async (req: AuthRequest, res) => {
       return;
     }
 
+    // Pompacı: açık vardiya zorunlu
+    const openShift = await prisma.shift.findFirst({
+      where: {
+        userId: req.user!.userId,
+        stationId: req.user!.stationId,
+        status: ShiftStatus.OPEN,
+      },
+    });
+    if (req.user!.role === UserRole.STAFF && !openShift) {
+      res.status(403).json({
+        error: "Yeni işlem için önce vardiya başlatmalısınız",
+        code: "SHIFT_REQUIRED",
+      });
+      return;
+    }
+
     const creditRequested =
       isCredit === true || isCredit === "true" || isCredit === "1";
     const vehicleRequested =
@@ -322,14 +338,6 @@ router.post("/", uploadReceipt, async (req: AuthRequest, res) => {
       transactionCreatedAt,
       receiptDateTime
     );
-
-    const openShift = await prisma.shift.findFirst({
-      where: {
-        userId: req.user!.userId,
-        stationId: req.user!.stationId,
-        status: ShiftStatus.OPEN,
-      },
-    });
 
     const TYPE_LABELS: Record<string, string> = {
       FUEL_BENZIN: "Benzin",
@@ -457,9 +465,6 @@ router.post("/", uploadReceipt, async (req: AuthRequest, res) => {
       transaction: sanitizeTransactionForRole(transaction, req.user!.role),
       creditSale: Boolean(creditCustomerId),
       vehicleFuel: Boolean(companyVehicleId),
-      shiftWarning: !openShift && req.user!.role === UserRole.STAFF
-        ? "Vardiya başlatılmadan kayıt girildi"
-        : null,
     });
   } catch (err) {
     console.error(err);
