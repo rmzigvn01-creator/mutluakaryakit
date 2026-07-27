@@ -7,7 +7,7 @@ services:
     region: frankfurt
     rootDir: backend
     buildCommand: NPM_CONFIG_PRODUCTION=false npm ci && npx prisma generate && npx tsc
-    startCommand: npx prisma db push --skip-generate && node dist/index.js
+    startCommand: npx prisma db push --skip-generate --accept-data-loss && node dist/index.js
     healthCheckPath: /health
     disk:
       name: uploads
