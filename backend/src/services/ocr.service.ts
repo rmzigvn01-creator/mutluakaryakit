@@ -34,8 +34,17 @@ export function isSuspiciousStatus(status: SuspicionStatus): boolean {
 
 /** Türkçe para: 1.000,00 | *1.000,00 | 42,44 | 1000.00 */
 export function parseTrMoney(raw: string): number | null {
-  const s = raw.replace(/\s/g, "").replace(/^[*\-–—]+/, "");
+  let s = raw.replace(/\s/g, "").replace(/^[*\-–—]+/, "");
   if (!s) return null;
+
+  // OCR: 4.309.74 (nokta hem binlik hem ondalık sanılmış) → 4.309,74
+  if (/^\d{1,3}(\.\d{3})+\.\d{2}$/.test(s)) {
+    s = s.replace(/\.(\d{2})$/, ",$1");
+  }
+  // OCR: 4.30974 (virgül kaybolmuş) → 4.309,74
+  if (/^\d{1,3}(\.\d{3})+\d{2}$/.test(s) && !s.includes(",")) {
+    s = s.replace(/(\d{2})$/, ",$1");
+  }
 
   // 1.000,00 veya 12.345,67
   if (/^\d{1,3}(\.\d{3})+,\d{2}$/.test(s)) {
@@ -47,20 +56,63 @@ export function parseTrMoney(raw: string): number | null {
     const n = parseFloat(s.replace(",", "."));
     return Number.isFinite(n) ? n : null;
   }
-  // 1000.00
+  // 1000.00 (US) — ama 430974.00 genelde TR virgül kaybı
   if (/^\d+\.\d{2}$/.test(s)) {
     const n = parseFloat(s);
-    return Number.isFinite(n) ? n : null;
+    if (!Number.isFinite(n)) return null;
+    // 5+ basamaklı *.00 → kuruş birleşmiş olabilir (430974.00 → 4309.74)
+    if (n >= 10000 && /^\d{5,}\.00$/.test(s)) return n / 100;
+    return n;
   }
-  // 1000
+  // 1000 veya OCR: 430974 (virgül/nokta tamamen kayıp)
   if (/^\d+$/.test(s)) {
     const n = parseFloat(s);
-    return Number.isFinite(n) ? n : null;
+    if (!Number.isFinite(n)) return null;
+    // 5–7 haneli tamsayı → son 2 hane kuruş (430974 → 4309.74)
+    if (s.length >= 5 && s.length <= 7 && n >= 10000) return n / 100;
+    return n;
   }
   return null;
 }
 
-const MONEY_CAPTURE = "(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+[.,]\\d{2}|\\d{2,6})";
+const MONEY_CAPTURE =
+  "(\\d{1,3}(?:\\.\\d{3})+(?:,\\d{2}|\\.\\d{2}|\\d{2})|\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+[.,]\\d{2}|\\d{4,7})";
+
+/**
+ * Litre × birim fiyattan tutar (OCR TOPLAM bozulunca yedek).
+ */
+export function amountFromLitersAndPrice(
+  liters: number | null,
+  unitPrice: number | null
+): number | null {
+  if (liters == null || unitPrice == null) return null;
+  if (liters <= 0 || unitPrice <= 0) return null;
+  return Math.round(liters * unitPrice * 100) / 100;
+}
+
+/**
+ * OCR bozuk tutarı düzelt: litre×fiyat ile çapraz kontrol.
+ */
+export function refineReceiptAmount(
+  amount: number | null,
+  liters: number | null,
+  unitPrice: number | null
+): number | null {
+  const computed = amountFromLitersAndPrice(liters, unitPrice);
+
+  // Yakıt fişlerinde LT × birim fiyat en güvenilir kaynak
+  if (computed != null) {
+    if (amount == null) return computed;
+    if (Math.abs(amount - computed) <= 1) return computed;
+    if (Math.abs(amount / 100 - computed) <= 1) return computed;
+    return computed;
+  }
+
+  if (amount != null && amount >= 10000 && Number.isInteger(amount)) {
+    return amount / 100;
+  }
+  return amount;
+}
 
 /**
  * Sarı alan — TOPLAM tutarı.
@@ -70,7 +122,11 @@ export function parseAmountFromText(text: string): number | null {
   const normalized = text.replace(/\s+/g, " ");
 
   const priorityPatterns = [
-    new RegExp(`(?:TOPLAM|GENEL\\s*TOPLAM)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`, "gi"),
+    // TOPLAM / OCR bozulmaları: TOPLAN, TOFLAM, T0PLAM, fn (nadiren)
+    new RegExp(
+      `(?:TOPLAM|TOPLAN|TOFLAM|T0PLAM|GENEL\\s*TOPLAM)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`,
+      "gi"
+    ),
     new RegExp(`(?:NAKIT|NAKİT|NAKİT)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`, "gi"),
     new RegExp(`(?:TUTAR|AMOUNT)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`, "gi"),
   ];
@@ -78,19 +134,31 @@ export function parseAmountFromText(text: string): number | null {
   for (const pattern of priorityPatterns) {
     const matches = [...normalized.matchAll(pattern)];
     if (matches.length === 0) continue;
-    // TOPLAM satırını tercih et; birden fazlaysa son anlamlı olan
     for (let i = matches.length - 1; i >= 0; i--) {
       const n = parseTrMoney(matches[i][1]);
-      if (n !== null && n > 0 && n < 500000) return n;
+      // 500_000 üstü ham değer; parseTrMoney zaten /100 yapmış olabilir
+      if (n !== null && n > 0 && n < 200000) return n;
     }
   }
 
-  // Yedek: satırda yalnız başına büyük tutar
+  // LT X fiyat satırının sağındaki tutar: 84,15 LT X 51,22 *4.309,74
+  const lineTotal = normalized.match(
+    new RegExp(
+      `\\d{1,4}[.,]\\d{1,3}\\s*(?:LT|LITRE)?\\s*[xX×*]\\s*\\d{1,4}[.,]\\d{1,3}\\s*\\*?${MONEY_CAPTURE}`,
+      "i"
+    )
+  );
+  if (lineTotal?.[1]) {
+    const n = parseTrMoney(lineTotal[1]);
+    if (n !== null && n >= 20 && n < 200000) return n;
+  }
+
   const loose = [...normalized.matchAll(new RegExp(`\\*?${MONEY_CAPTURE}`, "g"))]
     .map((m) => parseTrMoney(m[1]))
-    .filter((n): n is number => n !== null && n >= 20 && n < 500000);
+    .filter((n): n is number => n !== null && n >= 20 && n < 200000);
 
   if (loose.length === 0) return null;
+  // En büyük makul tutar (KDV değil TOPLAM)
   return Math.max(...loose);
 }
 
@@ -129,54 +197,59 @@ type TimeParts = { hour: number; minute: number };
 export function parseDateParts(text: string): DateParts | null {
   const normalized = text.replace(/\s+/g, " ");
 
+  const candidates: DateParts[] = [];
+
+  const pushIfValid = (day: number, month: number, year: number) => {
+    const y = normalizeYear(year);
+    if (day < 1 || day > 31 || month < 1 || month > 12) return;
+    if (y < 2020 || y > 2100) return;
+    candidates.push({ day, month, year: y });
+  };
+
   // Fiş no civarındaki tarihi önceliklendir
   const nearFis = normalized.match(
-    /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})[^\n]{0,40}F[Iİıi]?[SŞşs]\s*NO/i
+    /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\s+(\d{1,2})[:.](\d{2})[^\n]{0,60}F[Iİıi]?[SŞşs]\s*NO/i
   );
   if (nearFis) {
-    return {
-      day: parseInt(nearFis[1], 10),
-      month: parseInt(nearFis[2], 10),
-      year: parseInt(nearFis[3], 10),
-    };
+    pushIfValid(parseInt(nearFis[1], 10), parseInt(nearFis[2], 10), parseInt(nearFis[3], 10));
+  }
+
+  const nearFis2 = normalized.match(
+    /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})[^\n]{0,40}F[Iİıi]?[SŞşs]\s*NO/i
+  );
+  if (nearFis2) {
+    pushIfValid(parseInt(nearFis2[1], 10), parseInt(nearFis2[2], 10), parseInt(nearFis2[3], 10));
   }
 
   const fisNearDate = normalized.match(
     /F[Iİıi]?[SŞşs]\s*NO[^\n]{0,20}(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/i
   );
   if (fisNearDate) {
-    return {
-      day: parseInt(fisNearDate[1], 10),
-      month: parseInt(fisNearDate[2], 10),
-      year: parseInt(fisNearDate[3], 10),
-    };
+    pushIfValid(
+      parseInt(fisNearDate[1], 10),
+      parseInt(fisNearDate[2], 10),
+      parseInt(fisNearDate[3], 10)
+    );
   }
 
-  const patterns = [
-    /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/g,
-    /(\d{4})[./-](\d{1,2})[./-](\d{1,2})/g,
-  ];
-
-  for (const pattern of patterns) {
-    const matches = [...normalized.matchAll(pattern)];
-    if (matches.length === 0) continue;
-
-    const m = matches[0]; // fişte ilk tarih genelde işlem tarihi
-    if (pattern.source.startsWith("(\\d{4})")) {
-      return {
-        year: parseInt(m[1], 10),
-        month: parseInt(m[2], 10),
-        day: parseInt(m[3], 10),
-      };
-    }
-    return {
-      day: parseInt(m[1], 10),
-      month: parseInt(m[2], 10),
-      year: parseInt(m[3], 10),
-    };
+  // Saat ile aynı satır: 11-07-2025 01:09
+  for (const m of normalized.matchAll(
+    /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\s+(\d{1,2})[:.](\d{2})/g
+  )) {
+    pushIfValid(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
   }
 
-  return null;
+  for (const m of normalized.matchAll(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/g)) {
+    pushIfValid(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
+  }
+
+  for (const m of normalized.matchAll(/(\d{4})[./-](\d{1,2})[./-](\d{1,2})/g)) {
+    pushIfValid(parseInt(m[3], 10), parseInt(m[2], 10), parseInt(m[1], 10));
+  }
+
+  if (!candidates.length) return null;
+  // Lisans/MERSİS numaralarından gelen saçma adaylar elendi; ilk geçerliyi al
+  return candidates[0];
 }
 
 /**
@@ -239,27 +312,20 @@ export function parseDateTimeFromText(text: string): Date | null {
   );
 }
 
-function getIstanbulDateParts(date: Date): DateParts {
-  const fmt = new Intl.DateTimeFormat("en-GB", {
-    timeZone: ISTANBUL_TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const parts = fmt.formatToParts(date);
-  const get = (type: string) => parseInt(parts.find((p) => p.type === type)!.value, 10);
-  return { day: get("day"), month: get("month"), year: get("year") };
-}
-
 function isPlausibleReceiptDate(parsed: Date, referenceDate: Date): boolean {
-  if (parsed.getFullYear() < 2020) return false;
-  const diffDays = Math.abs(parsed.getTime() - referenceDate.getTime()) / 86_400_000;
-  return diffDays <= 2;
+  const y = parsed.getFullYear();
+  if (y < 2020 || y > 2100) return false;
+  // Gelecek: en fazla 1 gün; geçmiş: 3 yıla kadar (geç girilen fişler)
+  const diffMs = parsed.getTime() - referenceDate.getTime();
+  const diffDays = diffMs / 86_400_000;
+  if (diffDays > 1) return false;
+  if (diffDays < -366 * 3) return false;
+  return true;
 }
 
-/** Fişte sadece saat varsa kayıt tarihiyle birleştirir; sahte tarihleri eler */
+/** Fişte geçerli tarih+saat varsa kullanır; yoksa null (bugüne yapıştırmaz). */
 export function resolveReceiptDateTime(
-  text: string,
+  _text: string,
   referenceDate: Date,
   parsedDateTime: Date | null
 ): Date | null {
@@ -267,11 +333,9 @@ export function resolveReceiptDateTime(
     return parsedDateTime;
   }
 
-  const timeParts = parseTimeParts(text);
-  if (!timeParts) return null;
-
-  const { day, month, year } = getIstanbulDateParts(referenceDate);
-  return buildIstanbulDateTime(day, month, year, timeParts.hour, timeParts.minute);
+  // Tarih fişten çıkmadıysa / saçma lisans no'ya takıldıysa → null.
+  // Eski davranış (bugün + fiş saati) OCR'nin "27 Temmuz 2026 okudu" sanılmasına yol açıyordu.
+  return null;
 }
 
 /** Mavi alan — Fiş no. Örn: FİŞ NO: 0222 */
@@ -433,16 +497,20 @@ export function parseReceiptDetailsFromText(text: string): Omit<ReceiptExtractio
         )
       : null;
 
+  const liters = parseLitersFromText(text);
+  const unitPrice = parseUnitPriceFromText(text);
+  const rawAmount = parseAmountFromText(text);
+
   return {
-    amount: parseAmountFromText(text),
+    amount: refineReceiptAmount(rawAmount, liters, unitPrice),
     dateTime,
     date: dateParts ? formatDateField(dateParts) : null,
     time: timeParts ? formatTimeField(timeParts) : null,
     receiptNo: parseReceiptNoFromText(text),
-    liters: parseLitersFromText(text),
+    liters,
     fuelKind: parseFuelKindFromText(text),
     plate: parsePlateFromText(text),
-    unitPrice: parseUnitPriceFromText(text),
+    unitPrice,
   };
 }
 
