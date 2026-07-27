@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Petrol Ofisi">
+  <rect width="512" height="512" rx="48" fill="#ED1C24"/>
+  <path fill="#fff" d="M128 340c8-72 52-128 128-128s120 56 128 128H128zm128-168c-46 0-84 34-92 78h184c-8-44-46-78-92-78z"/>
+  <text x="256" y="420" text-anchor="middle" fill="#fff" font-family="Arial Black, Arial, sans-serif" font-size="72" font-weight="900">PO</text>
+</svg>

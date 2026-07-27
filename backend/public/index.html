@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="theme-color" content="#ED1C24">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Mutlu Akaryakıt">
+  <title>Mutlu Akaryakıt | Petrol Ofisi Bayi</title>
+  <link rel="icon" type="image/svg+xml" href="/logo-po.svg">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- GİRİŞ -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-top-brand">
+    <div class="po-logo">
+      <div class="po-logo-mark">
+        <span class="po-text">PO</span>
+      </div>
+    </div>
+    <p class="po-brand-title" style="margin-top:16px">Petrol Ofisi Bayi</p>
+    <p class="po-dealer-name">Mutlu Akaryakıt</p>
+  </div>
+
+  <div class="login-box">
+    <div class="login-box-header">
+      <p class="po-subtitle">Satış & Ödeme Yönetim Sistemi</p>
+    </div>
+    <div id="loginError" class="error-msg hidden"></div>
+    <div class="form-group">
+      <label>E-posta</label>
+      <input type="email" id="loginEmail" placeholder="ornek@mutluakaryakit.local" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label>Şifre</label>
+      <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Giriş Yap</button>
+  </div>
+
+  <p class="login-footer">Petrol Ofisi Bayi · Mutlu Akaryakıt © 2026</p>
+</div>
+
+<!-- UYGULAMA -->
+<div id="app" class="app hidden">
+  <div id="syncBanner" class="sync-banner hidden"></div>
+  <header class="header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <div class="po-logo-mark sm"><span class="po-text">PO</span></div>
+        <div class="header-brand-text">
+          <div class="dealer">Mutlu Akaryakıt</div>
+          <div class="page" id="headerTitle">Ana Menü</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span id="pendingBadge" class="badge hidden"></span>
+        <span class="user-name" id="userName"></span>
+        <button class="btn btn-sm btn-ghost-white" onclick="doLogout()">Çıkış</button>
+      </div>
+    </div>
+    <div class="header-stripe"></div>
+  </header>
+  <main class="content" id="mainContent"></main>
+</div>
+
+<div id="modalOverlay" class="modal-overlay hidden" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<script src="/app.js?v=15"></script>
+</body>
+</html>

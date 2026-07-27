@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+*.db
+*.db-journal
+uploads/
+.DS_Store
+.idea/
+.vscode/
+app/.dart_tool/
+app/build/
+app/.flutter-plugins-dependencies
+app/ios/Pods/
+app/windows/flutter/ephemeral/

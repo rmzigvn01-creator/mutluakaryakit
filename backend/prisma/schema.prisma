@@ -1,0 +1,342 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  STAFF
+  ACCOUNTANT
+  ADMIN
+}
+
+enum TransactionType {
+  FUEL_BENZIN
+  FUEL_MOTORIN
+  CARD_POS
+  CASH
+  OTHER
+}
+
+enum SuspicionStatus {
+  PENDING_OCR
+  NORMAL
+  SUSPICIOUS_MISMATCH
+  SUSPICIOUS_DATETIME_MISMATCH
+  SUSPICIOUS_UNREADABLE
+  REVIEWED
+}
+
+enum CorrectionType {
+  EDIT
+  DELETE
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+model Station {
+  id           String           @id @default(uuid())
+  name         String
+  createdAt    DateTime         @default(now())
+  users        User[]
+  transactions Transaction[]
+  shifts       Shift[]
+  customers    Customer[]
+  suppliers    Supplier[]
+  vehicles     CompanyVehicle[]
+}
+
+model Customer {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  name      String
+  phone     String?
+  note      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sales     CreditSale[]
+  payments  CreditPayment[]
+  transactions Transaction[]
+
+  @@index([stationId, name])
+  @@index([stationId, isActive])
+}
+
+model CreditSale {
+  id            String       @id @default(uuid())
+  customerId    String
+  customer      Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  transactionId String?      @unique
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  amount        Float
+  description   String?
+  createdById   String
+  createdAt     DateTime     @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+model CreditPayment {
+  id          String   @id @default(uuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  amount      Float
+  note        String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+/** Mutlu Tarım — tedarikçi firmalar (biz borçluyuz) */
+model Supplier {
+  id         String            @id @default(uuid())
+  stationId  String
+  station    Station           @relation(fields: [stationId], references: [id])
+  name       String
+  phone      String?
+  note       String?
+  isActive   Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  purchases  ExpensePurchase[]
+  payments   ExpensePayment[]
+
+  @@index([stationId, name])
+  @@index([stationId, isActive])
+}
+
+model ExpensePurchase {
+  id          String   @id @default(uuid())
+  supplierId  String
+  supplier    Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  amount      Float
+  description String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([supplierId, createdAt])
+}
+
+model ExpensePayment {
+  id          String   @id @default(uuid())
+  supplierId  String
+  supplier    Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  amount      Float
+  note        String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([supplierId, createdAt])
+}
+
+/** Şirket araçları — istasyon yakıt takibi */
+model CompanyVehicle {
+  id           String           @id @default(uuid())
+  stationId    String
+  station      Station          @relation(fields: [stationId], references: [id])
+  name         String
+  plate        String
+  note         String?
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  fills        VehicleFuelFill[]
+  transactions Transaction[]
+
+  @@index([stationId, plate])
+  @@index([stationId, isActive])
+}
+
+model VehicleFuelFill {
+  id            String         @id @default(uuid())
+  vehicleId     String
+  vehicle       CompanyVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  transactionId String?        @unique
+  transaction   Transaction?   @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  amount        Float
+  description   String?
+  createdById   String
+  createdAt     DateTime       @default(now())
+
+  @@index([vehicleId, createdAt])
+}
+
+model User {
+  id                   String              @id @default(uuid())
+  email                String              @unique
+  passwordHash         String
+  name                 String
+  role                 UserRole
+  stationId            String
+  station              Station             @relation(fields: [stationId], references: [id])
+  createdAt            DateTime            @default(now())
+  transactions         Transaction[]       @relation("CreatedBy")
+  correctionRequests   CorrectionRequest[] @relation("RequestedBy")
+  reviewedCorrections  CorrectionRequest[] @relation("ReviewedBy")
+  reviewedSuspicious   Transaction[]       @relation("ReviewedBy")
+  auditLogs            AuditLog[]
+  shifts               Shift[]
+  pushDevices          PushDevice[]
+  appNotifications     AppNotification[]
+}
+
+model Transaction {
+  id              String            @id @default(uuid())
+  clientId        String            @unique
+  stationId       String
+  station         Station           @relation(fields: [stationId], references: [id])
+  type            TransactionType
+  enteredAmount   Float
+  receiptAmount   Float?
+  receiptDateTime DateTime?
+  amountDiff      Float?
+  description     String?
+  receiptPath     String?
+  /// Fiş görseli (Neon'da kalıcı; disk kaybına karşı)
+  receiptData     Bytes?
+  receiptMime     String?
+  isCredit         Boolean           @default(false)
+  customerId       String?
+  customer         Customer?         @relation(fields: [customerId], references: [id])
+  creditSale       CreditSale?
+  isCompanyVehicle Boolean           @default(false)
+  vehicleId        String?
+  vehicle          CompanyVehicle?   @relation(fields: [vehicleId], references: [id])
+  vehicleFuelFill  VehicleFuelFill?
+  suspicionStatus  SuspicionStatus   @default(PENDING_OCR)
+  suspicionNote   String?
+  reviewedById    String?
+  reviewedBy      User?             @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  createdById     String
+  createdBy       User              @relation("CreatedBy", fields: [createdById], references: [id])
+  shiftId         String?
+  shift           Shift?            @relation(fields: [shiftId], references: [id])
+  syncStatus      SyncStatus        @default(SYNCED)
+  deviceInfo      String?
+  isDeleted       Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  corrections     CorrectionRequest[]
+
+  @@index([stationId, createdAt])
+  @@index([createdById, createdAt])
+  @@index([suspicionStatus])
+  @@index([shiftId])
+}
+
+model Shift {
+  id           String      @id @default(uuid())
+  stationId    String
+  station      Station     @relation(fields: [stationId], references: [id])
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  status       ShiftStatus @default(OPEN)
+  startedAt    DateTime    @default(now())
+  endedAt      DateTime?
+  closingNote  String?
+  transactions Transaction[]
+
+  @@index([stationId, startedAt])
+  @@index([userId, status])
+}
+
+model CorrectionRequest {
+  id            String           @id @default(uuid())
+  transactionId String
+  transaction   Transaction      @relation(fields: [transactionId], references: [id])
+  type          CorrectionType
+  reason        String
+  oldValues     String
+  newValues     String?
+  status        CorrectionStatus @default(PENDING)
+  requestedById String
+  requestedBy   User             @relation("RequestedBy", fields: [requestedById], references: [id])
+  reviewedById  String?
+  reviewedBy    User?            @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  createdAt     DateTime         @default(now())
+
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String
+  entityType String
+  entityId   String
+  details    String
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model PushDevice {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, token])
+  @@index([userId])
+}
+
+model AppNotification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  data      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
+/** Petrol Ofisi akaryakıt fiyatları (Edirne / İpsala) */
+model FuelPriceSnapshot {
+  id           String   @id @default(uuid())
+  cityId       String
+  cityName     String
+  districtId   String
+  districtName String
+  benzin       Float
+  motorin      Float
+  gazyagi      Float?
+  kalorifer    Float?
+  fuelOil      Float?
+  lpg          Float
+  source       String   @default("petrolofisi")
+  fetchedAt    DateTime @default(now())
+
+  @@index([districtId, fetchedAt])
+}

@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: mutluakaryakit
+    runtime: node
+    # free plan uyur; her zaman açık için starter (ücretli)
+    plan: starter
+    region: frankfurt
+    rootDir: backend
+    buildCommand: npm ci && npx prisma generate && npx tsc
+    startCommand: npx prisma db push --skip-generate && node dist/index.js
+    healthCheckPath: /health
+    disk:
+      name: uploads
+      mountPath: /var/data/uploads
+      sizeGB: 10
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: OCR_TOLERANCE_TL
+        value: "2"
+      - key: OCR_TIME_TOLERANCE_MINUTES
+        value: "30"
+      - key: FUEL_PRICE_POLL_MS
+        value: "300000"
