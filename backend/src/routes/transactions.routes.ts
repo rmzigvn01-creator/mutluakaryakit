@@ -15,16 +15,16 @@ import {
 import { prisma } from "../lib/prisma.js";
 import { config } from "../lib/config.js";
 import { authMiddleware, requireRoles, AuthRequest } from "../middleware/auth.js";
-import { extractFromReceipt, evaluateSuspicion, resolveReceiptDateTime, fuelKindToTransactionType, isSuspiciousStatus } from "../services/ocr.service.js";
+import { extractFromReceipt, fuelKindToTransactionType } from "../services/ocr.service.js";
 import { isAllowedReceiptUpload, normalizeReceiptImage } from "../services/image.service.js";
 import { logAudit } from "../services/audit.service.js";
-import { notifyAdminsSuspiciousTransaction } from "../services/push.service.js";
 import {
   sanitizeTransactionForRole,
   sanitizeTransactionsForRole,
 } from "../lib/roles.js";
 import { getLatestFuelPrices, refreshFuelPrices } from "../services/fuel-price.service.js";
 import { routeId } from "../lib/route-id.js";
+import { processTransactionOcr } from "../services/ocr-queue.service.js";
 
 const router = Router();
 
@@ -33,71 +33,6 @@ function resolveReceiptPath(storedPath: string): string {
   return path.resolve(config.backendRoot, storedPath.replace(/^\.\//, ""));
 }
 
-/** Kayıt sonrası arka plan OCR — isteği bekletmez */
-async function processReceiptOcrInBackground(params: {
-  transactionId: string;
-  filePath: string;
-  originalName: string;
-  enteredAmount: number;
-  createdAt: Date;
-  stationId: string;
-  type: TransactionType;
-  createdBy: { id: string; name: string; email: string };
-}) {
-  try {
-    const extracted = await extractFromReceipt(params.filePath, params.originalName);
-    const receiptDateTime = resolveReceiptDateTime(
-      extracted.text,
-      params.createdAt,
-      extracted.dateTime
-    );
-    const { status, diff } = evaluateSuspicion(
-      params.enteredAmount,
-      extracted.amount,
-      params.createdAt,
-      receiptDateTime
-    );
-
-    const updated = await prisma.transaction.update({
-      where: { id: params.transactionId },
-      data: {
-        receiptAmount: extracted.amount,
-        receiptDateTime,
-        amountDiff: diff,
-        suspicionStatus: status,
-        suspicionNote: extracted.receiptNo
-          ? `OCR fiş no: ${extracted.receiptNo}`
-          : null,
-      },
-      include: {
-        createdBy: { select: { id: true, name: true, email: true } },
-      },
-    });
-
-    if (isSuspiciousStatus(status)) {
-      void notifyAdminsSuspiciousTransaction({
-        id: updated.id,
-        stationId: params.stationId,
-        type: params.type,
-        enteredAmount: updated.enteredAmount,
-        receiptAmount: updated.receiptAmount,
-        amountDiff: updated.amountDiff,
-        suspicionStatus: updated.suspicionStatus,
-        createdBy: updated.createdBy,
-      });
-    }
-  } catch (err) {
-    console.warn("Arka plan OCR hatası:", err);
-    try {
-      await prisma.transaction.update({
-        where: { id: params.transactionId },
-        data: { suspicionStatus: SuspicionStatus.SUSPICIOUS_UNREADABLE },
-      });
-    } catch {
-      /* ignore */
-    }
-  }
-}
 
 if (!fs.existsSync(config.uploadDir)) {
   fs.mkdirSync(config.uploadDir, { recursive: true });
@@ -507,16 +442,7 @@ router.post("/", uploadReceipt, async (req: AuthRequest, res) => {
     });
 
     // OCR arka planda — yanıtı bekletmez
-    void processReceiptOcrInBackground({
-      transactionId: transaction.id,
-      filePath: resolvedPath,
-      originalName: req.file.originalname,
-      enteredAmount: amount,
-      createdAt: transaction.createdAt,
-      stationId: transaction.stationId,
-      type: transaction.type,
-      createdBy: transaction.createdBy,
-    });
+    void processTransactionOcr(transaction.id);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "İşlem kaydedilemedi" });

@@ -18,6 +18,7 @@ import expenseRoutes from "./routes/expense.routes.js";
 import vehicleRoutes from "./routes/vehicles.routes.js";
 import fuelPriceRoutes from "./routes/fuel-prices.routes.js";
 import { refreshFuelPrices, startFuelPricePoller } from "./services/fuel-price.service.js";
+import { startPendingOcrRecovery } from "./services/ocr-queue.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const app = express();
@@ -94,6 +95,7 @@ if (!isServerless) {
     console.log(`Mutlu Akaryakıt → http://localhost:${config.port}`);
     console.log(`Telefondan erişim için bilgisayar IP adresinizi kullanın`);
     startFuelPricePoller();
+    startPendingOcrRecovery();
   });
 } else {
   // Serverless: tek seferlik çekim (setInterval yok / soğuk start)
