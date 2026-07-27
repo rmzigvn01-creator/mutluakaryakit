@@ -242,6 +242,7 @@ model Transaction {
   corrections     CorrectionRequest[]
 
   @@index([stationId, createdAt])
+  @@index([stationId, suspicionStatus, createdAt])
   @@index([createdById, createdAt])
   @@index([suspicionStatus])
   @@index([shiftId])

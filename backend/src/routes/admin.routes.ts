@@ -12,7 +12,11 @@ router.use(requireRoles(UserRole.ADMIN));
 
 // Şüpheli işlemler listesi
 router.get("/suspicious", async (req: AuthRequest, res) => {
-  const { reviewed = "false" } = req.query as { reviewed?: string };
+  const { reviewed = "false", limit = "50" } = req.query as {
+    reviewed?: string;
+    limit?: string;
+  };
+  const take = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100);
 
   const statuses =
     reviewed === "true"
@@ -24,19 +28,40 @@ router.get("/suspicious", async (req: AuthRequest, res) => {
           SuspicionStatus.PENDING_OCR,
         ];
 
-  const transactions = await prisma.transaction.findMany({
-    where: {
-      stationId: req.user!.stationId,
-      isDeleted: false,
-      suspicionStatus: { in: statuses },
-    },
-    include: {
-      createdBy: { select: { id: true, name: true, email: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const [transactions, count] = await Promise.all([
+    prisma.transaction.findMany({
+      where: {
+        stationId: req.user!.stationId,
+        isDeleted: false,
+        suspicionStatus: { in: statuses },
+      },
+      // Fiş binary'sini (receiptData) çekme — listeyi MB'larca şişirir
+      select: {
+        id: true,
+        type: true,
+        enteredAmount: true,
+        receiptAmount: true,
+        receiptDateTime: true,
+        amountDiff: true,
+        description: true,
+        suspicionStatus: true,
+        suspicionNote: true,
+        createdAt: true,
+        createdBy: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take,
+    }),
+    prisma.transaction.count({
+      where: {
+        stationId: req.user!.stationId,
+        isDeleted: false,
+        suspicionStatus: { in: statuses },
+      },
+    }),
+  ]);
 
-  res.json({ transactions, count: transactions.length });
+  res.json({ transactions, count });
 });
 
 // Şüpheli işlemi incele / not ekle
@@ -49,6 +74,7 @@ router.post("/suspicious/:id/review", async (req: AuthRequest, res) => {
       stationId: req.user!.stationId,
       isDeleted: false,
     },
+    select: { id: true },
   });
 
   if (!transaction) {
@@ -64,7 +90,11 @@ router.post("/suspicious/:id/review", async (req: AuthRequest, res) => {
       reviewedById: req.user!.userId,
       reviewedAt: new Date(),
     },
-    include: {
+    select: {
+      id: true,
+      suspicionStatus: true,
+      suspicionNote: true,
+      reviewedAt: true,
       createdBy: { select: { id: true, name: true } },
     },
   });

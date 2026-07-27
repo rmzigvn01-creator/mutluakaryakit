@@ -1231,6 +1231,9 @@ async function showSuspicious() {
       list.innerHTML = '<p class="empty">Şüpheli işlem yok 🎉</p>';
       return;
     }
+    const more = data.count > data.transactions.length
+      ? `<p class="credit-hint" style="margin-top:12px">Son ${data.transactions.length} kayıt gösteriliyor (toplam ${data.count})</p>`
+      : '';
     list.innerHTML = data.transactions.map(t => {
       const amountWarn = t.receiptAmount && Math.abs(t.amountDiff || 0) > 2
         ? `<strong>Girilen: ${fmt(t.enteredAmount)} · Fiş: ${fmt(t.receiptAmount)} · Fark: ${fmt(t.amountDiff || 0)}</strong>`
@@ -1250,7 +1253,7 @@ async function showSuspicious() {
           <button class="btn btn-sm btn-warning" onclick="openReviewSuspiciousModal('${t.id}')">İncelendi</button>
         </div>
       </div>`;
-    }).join('');
+    }).join('') + more;
   } catch (e) {
     document.getElementById('suspList').innerHTML = `<p class="empty">${e.message}</p>`;
   }
