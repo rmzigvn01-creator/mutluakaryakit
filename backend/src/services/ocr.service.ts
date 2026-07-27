@@ -102,16 +102,24 @@ export function refineReceiptAmount(
 
   if (computed != null && amount != null) {
     // TOPLAM ≈ LT×fiyat → fişteki TOPLAM'ı koru (yuvarlama farkı)
-    if (Math.abs(amount - computed) <= 2) return Math.round(amount * 100) / 100;
-    // 430974 gibi virgöl kaybı
-    if (Math.abs(amount / 100 - computed) <= 2) {
-      return Math.round((amount / 100) * 100) / 100;
+    if (Math.abs(amount - computed) <= 2) {
+      return Math.round(amount * 100) / 100;
     }
-    // TOPLAM tamamen yanlış → LT×fiyat
-    return computed;
+    // 430974 → 4309.74 (virgül kaybı)
+    if (Math.abs(amount / 100 - computed) <= 2) {
+      return Math.round(amount) / 100;
+    }
+    // 44309,74 ← "*4.309,74" (binlik nokta kaybolup 4 yapışık)
+    if (amount >= 10000) {
+      const stripped = amount % 10000;
+      if (stripped >= 20 && Math.abs(stripped - computed) <= 2) {
+        return Math.round(stripped * 100) / 100;
+      }
+    }
+    return Math.round(computed * 100) / 100;
   }
 
-  if (computed != null) return computed;
+  if (computed != null) return Math.round(computed * 100) / 100;
 
   if (amount != null && amount >= 10000 && Number.isInteger(amount)) {
     return amount / 100;
@@ -126,14 +134,17 @@ export function refineReceiptAmount(
 export function parseAmountFromText(text: string): number | null {
   const normalized = text.replace(/\s+/g, " ");
 
+  // Ondalıklı / binlik ayraçlı tutarlar (MERSİS no gibi düz rakamları alma)
+  const moneyDot =
+    "(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d{1,3}(?:\\.\\d{3})+\\.\\d{2}|\\d{1,3}(?:\\.\\d{3})+\\d{2}|\\d+[.,]\\d{2})";
+  const moneyInt = "(\\d{5,7})";
+
   const priorityPatterns = [
-    // TOPLAM / OCR bozulmaları: TOPLAN, TOFLAM, T0PLAM, fn (nadiren)
-    new RegExp(
-      `(?:TOPLAM|TOPLAN|TOFLAM|T0PLAM|GENEL\\s*TOPLAM)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`,
-      "gi"
-    ),
-    new RegExp(`(?:NAKIT|NAKİT|NAKİT)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`, "gi"),
-    new RegExp(`(?:TUTAR|AMOUNT)\\s*[:*]?\\s*\\*?${MONEY_CAPTURE}`, "gi"),
+    new RegExp(`(?:TOPLAM|TOPLAN|TOFLAM|T0PLAM|GENEL\\s*TOPLAM)\\s*[:*]?\\s*\\*?${moneyDot}`, "gi"),
+    new RegExp(`(?:TOPLAM|TOPLAN|TOFLAM|T0PLAM|GENEL\\s*TOPLAM)\\s*[:*]?\\s*\\*?${moneyInt}`, "gi"),
+    new RegExp(`(?:NAKIT|NAKİT|NAKİT)\\s*[:*]?\\s*\\*?${moneyDot}`, "gi"),
+    new RegExp(`(?:NAKIT|NAKİT|NAKİT)\\s*[:*]?\\s*\\*?${moneyInt}`, "gi"),
+    new RegExp(`(?:TUTAR|AMOUNT)\\s*[:*]?\\s*\\*?${moneyDot}`, "gi"),
   ];
 
   for (const pattern of priorityPatterns) {
@@ -141,15 +152,14 @@ export function parseAmountFromText(text: string): number | null {
     if (matches.length === 0) continue;
     for (let i = matches.length - 1; i >= 0; i--) {
       const n = parseTrMoney(matches[i][1]);
-      // 500_000 üstü ham değer; parseTrMoney zaten /100 yapmış olabilir
       if (n !== null && n > 0 && n < 200000) return n;
     }
   }
 
-  // LT X fiyat satırının sağındaki tutar: 84,15 LT X 51,22 *4.309,74
+  // LT X fiyat satırının sağındaki tutar: 84,15 LT X 51,22 *4.309,74 / 44309,74
   const lineTotal = normalized.match(
     new RegExp(
-      `\\d{1,4}[.,]\\d{1,3}\\s*(?:LT|LITRE)?\\s*[xX×*]\\s*\\d{1,4}[.,]\\d{1,3}\\s*\\*?${MONEY_CAPTURE}`,
+      `\\d{1,4}[.,]\\d{1,3}\\s*(?:LT|LITRE)?\\s*[xX×*]\\s*\\d{1,4}[.,]\\d{1,3}\\s*\\*?${moneyDot}`,
       "i"
     )
   );
@@ -158,13 +168,18 @@ export function parseAmountFromText(text: string): number | null {
     if (n !== null && n >= 20 && n < 200000) return n;
   }
 
-  const loose = [...normalized.matchAll(new RegExp(`\\*?${MONEY_CAPTURE}`, "g"))]
+  // Satırda yalnız "430974" gibi TOPLAM kalıntısı (etiket okunamamış)
+  const orphanInt = [...normalized.matchAll(/\b(\d{5,7})\b/g)]
     .map((m) => parseTrMoney(m[1]))
-    .filter((n): n is number => n !== null && n >= 20 && n < 200000);
+    .filter((n): n is number => n !== null && n >= 50 && n < 100000);
 
-  if (loose.length === 0) return null;
-  // En büyük makul tutar (KDV değil TOPLAM)
-  return Math.max(...loose);
+  const loose = [...normalized.matchAll(new RegExp(`\\*?${moneyDot}`, "g"))]
+    .map((m) => parseTrMoney(m[1]))
+    .filter((n): n is number => n !== null && n >= 50 && n < 200000);
+
+  const all = [...loose, ...orphanInt];
+  if (all.length === 0) return null;
+  return Math.max(...all);
 }
 
 function normalizeYear(year: number): number {

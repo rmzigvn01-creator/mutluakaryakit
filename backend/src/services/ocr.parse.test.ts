@@ -83,6 +83,14 @@ assert(parseTrMoney("4.309,74") === 4309.74, "parseTrMoney 4.309,74");
 assert(parseTrMoney("430974") === 4309.74, "OCR 430974 → 4309.74");
 assert(parseTrMoney("430974.00") === 4309.74, "OCR 430974.00 → 4309.74");
 assert(parseTrMoney("4.309.74") === 4309.74, "OCR 4.309.74 → 4309.74");
+assert(
+  refineReceiptAmount(44309.74, 84.15, 51.22) === 4309.74,
+  "44309,74 strip leading digit via lt×price"
+);
+assert(
+  refineReceiptAmount(430974, 84.15, 51.22) === 4309.74,
+  "refine 430974 with lt×price"
+);
 
 assert(parseFuelKindFromText("KURSUNSUZ 95") === "BENZIN", "benzin");
 assert(parseFuelKindFromText("OTOGAZ") === "LPG", "otogaz");
