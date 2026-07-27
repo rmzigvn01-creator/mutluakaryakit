@@ -40,58 +40,17 @@ body {
   gap: 12px;
 }
 
-.po-logo-mark {
-  width: 72px;
-  height: 72px;
-  background: var(--po-red);
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-lg);
-  position: relative;
-  overflow: hidden;
+.po-logo-img {
+  display: block;
+  width: min(280px, 72vw);
+  height: auto;
+  object-fit: contain;
 }
 
-.po-logo-mark::before {
-  content: '';
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 36px;
-  height: 20px;
-  background: white;
-  border-radius: 50% 50% 0 0;
-  opacity: .9;
-}
-
-.po-logo-mark .po-text {
-  font-size: 26px;
-  font-weight: 800;
-  color: white;
-  letter-spacing: -1px;
-  margin-top: 18px;
-  position: relative;
-  z-index: 1;
-}
-
-.po-logo-mark.sm {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  box-shadow: none;
-}
-
-.po-logo-mark.sm::before {
-  width: 18px;
-  height: 10px;
-  top: 6px;
-}
-
-.po-logo-mark.sm .po-text {
-  font-size: 13px;
-  margin-top: 9px;
+.po-logo-img.header {
+  width: 140px;
+  height: auto;
+  flex-shrink: 0;
 }
 
 .po-brand-title {
@@ -100,6 +59,7 @@ body {
   color: var(--po-red);
   letter-spacing: 2px;
   text-transform: uppercase;
+  margin-top: 16px;
 }
 
 .po-dealer-name {
@@ -948,19 +908,16 @@ body {
   }
 
   .login-top-brand .po-logo { align-items: flex-start; }
-  .login-top-brand .po-logo-mark {
-    width: 96px;
-    height: 96px;
-    border-radius: 18px;
-  }
-  .login-top-brand .po-logo-mark .po-text {
-    font-size: 34px;
-    margin-top: 22px;
+  .login-top-brand .po-logo-img {
+    width: min(320px, 100%);
   }
   .login-top-brand .po-brand-title {
     margin-top: 28px;
     font-size: 14px;
     letter-spacing: 3px;
+  }
+  .header-brand .po-logo-img.header {
+    width: 160px;
   }
   .login-top-brand .po-dealer-name {
     font-size: 42px;
