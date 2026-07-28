@@ -874,39 +874,41 @@ async function showNewTransaction() {
         <option value="CASH">Nakit</option>
       </select>
     </div>
-    <div class="form-group credit-toggle-wrap" id="creditToggleWrap">
-      <label class="credit-check-label" for="txIsCredit">
-        <input type="checkbox" id="txIsCredit" onchange="toggleSaleOptions('credit')">
-        <span class="credit-switch" aria-hidden="true"></span>
-        <span class="credit-copy">
-          <strong>Veresiye satış</strong>
-          <small>Seçilirse satış müşterinin veresiye defterine yazılır</small>
-        </span>
-      </label>
+    <div class="sale-options">
+      <div class="form-group credit-toggle-wrap" id="creditToggleWrap">
+        <label class="credit-check-label" for="txIsCredit">
+          <input type="checkbox" id="txIsCredit" onchange="toggleSaleOptions('credit')">
+          <span class="credit-switch" aria-hidden="true"></span>
+          <span class="credit-copy">
+            <strong>Veresiye satış</strong>
+            <small>Seçilirse satış müşterinin veresiye defterine yazılır</small>
+          </span>
+        </label>
+        <div class="sale-option-panel hidden" id="creditCustomerGroup">
+          <label for="txCustomer">Müşteri *</label>
+          <select id="txCustomer">
+            <option value="">Müşteri seçin...</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group credit-toggle-wrap vehicle-toggle" id="vehicleToggleWrap">
+        <label class="credit-check-label" for="txIsVehicle">
+          <input type="checkbox" id="txIsVehicle" onchange="toggleSaleOptions('vehicle')">
+          <span class="credit-switch" aria-hidden="true"></span>
+          <span class="credit-copy">
+            <strong>Şirket aracı</strong>
+            <small>Seçilirse yakıt şirket aracının defterine yazılır</small>
+          </span>
+        </label>
+        <div class="sale-option-panel hidden" id="vehicleSelectGroup">
+          <label for="txVehicle">Şirket aracı *</label>
+          <select id="txVehicle">
+            <option value="">Araç seçin...</option>
+          </select>
+        </div>
+      </div>
     </div>
-    <div class="form-group hidden" id="creditCustomerGroup">
-      <label>Müşteri *</label>
-      <select id="txCustomer">
-        <option value="">Müşteri seçin...</option>
-      </select>
-    </div>
-    <div class="form-group credit-toggle-wrap vehicle-toggle" id="vehicleToggleWrap">
-      <label class="credit-check-label" for="txIsVehicle">
-        <input type="checkbox" id="txIsVehicle" onchange="toggleSaleOptions('vehicle')">
-        <span class="credit-switch" aria-hidden="true"></span>
-        <span class="credit-copy">
-          <strong>Şirket aracı</strong>
-          <small>Seçilirse yakıt şirket aracının defterine yazılır</small>
-        </span>
-      </label>
-    </div>
-    <div class="form-group hidden" id="vehicleSelectGroup">
-      <label>Şirket Aracı *</label>
-      <select id="txVehicle">
-        <option value="">Araç seçin...</option>
-      </select>
-    </div>
-    <div class="form-row-2">
+    <div class="form-row-2 tx-meta-row">
       <div class="form-group">
         <label>Fiş No</label>
         <input type="text" id="txReceiptNo" placeholder="" inputmode="numeric" autocomplete="off" name="receipt-no">
