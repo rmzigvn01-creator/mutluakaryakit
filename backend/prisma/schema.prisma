@@ -53,6 +53,15 @@ enum ShiftStatus {
   CLOSED
 }
 
+enum DocumentCategory {
+  LICENSE
+  INSURANCE
+  CALIBRATION
+  FIRE_REPORT
+  MAINTENANCE
+  OTHER
+}
+
 model Station {
   id            String           @id @default(uuid())
   name          String
@@ -65,6 +74,7 @@ model Station {
   vehicles      CompanyVehicle[]
   announcements Announcement[]
   chatMessages  ChatMessage[]
+  documents     StationDocument[]
 }
 
 model ChatMessage {
@@ -233,8 +243,31 @@ model User {
   appNotifications     AppNotification[]
   announcements        Announcement[]      @relation("AnnouncementCreatedBy")
   chatMessages         ChatMessage[]
+  documents            StationDocument[]   @relation("DocumentCreatedBy")
 
   @@index([stationId, role, isActive])
+}
+
+model StationDocument {
+  id          String           @id @default(uuid())
+  stationId   String
+  station     Station          @relation(fields: [stationId], references: [id])
+  category    DocumentCategory
+  title       String
+  note        String?
+  expiresAt   DateTime?
+  fileName    String
+  filePath    String?
+  /// Belge dosyası (Neon'da kalıcı; disk kaybına karşı)
+  fileData    Bytes?
+  fileMime    String?
+  createdById String
+  createdBy   User             @relation("DocumentCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([stationId, expiresAt])
+  @@index([stationId, category])
 }
 
 model Transaction {

@@ -1469,7 +1469,17 @@ async function showDashboard() {
     pageHeader('Yönetici Paneli', 'showHome()') + '<div id="dashContent"><p class="empty">Yükleniyor...</p></div>';
 
   try {
-    const d = await api('GET', '/admin/dashboard');
+    const [d, docsMeta] = await Promise.all([
+      api('GET', '/admin/dashboard'),
+      api('GET', '/documents').catch(() => ({ summary: { expired: 0, expiring: 0 } })),
+    ]);
+    const expired = docsMeta.summary?.expired || 0;
+    const expiring = docsMeta.summary?.expiring || 0;
+    const warnN = expired + expiring;
+    const docHint = warnN > 0
+      ? `${warnN} belge süre uyarısı`
+      : 'Ruhsat, sigorta ve diğer belgeler';
+
     document.getElementById('dashContent').innerHTML = `
       <div class="stats-grid">
         <div class="stat-card"><div class="label">Bugünkü İşlem</div><div class="value">${d.today.transactionCount}</div></div>
@@ -1479,6 +1489,7 @@ async function showDashboard() {
       </div>
       <p class="section-label">Yönetim</p>
       <div class="menu-grid">
+        ${menuCard('📁','Evrak Merkezi', docHint,'showDocumentsAdmin()', warnN > 0)}
         ${menuCard('📢','Duyurular','Kurallar ve duyuru yayınla','showAnnouncementsAdmin()')}
         ${menuCard('👤','Üyeler','Pompacı / muhasebeci ekle','showUsers()')}
       </div>
@@ -1501,6 +1512,291 @@ async function showDashboard() {
     document.getElementById('dashContent').innerHTML = `<p class="empty">${e.message}</p>`;
   }
 }
+
+// ===== EVRAK MERKEZİ (ADMIN) =====
+const DOC_CATEGORY_LABELS = {
+  LICENSE: 'Ruhsat',
+  INSURANCE: 'Sigorta',
+  CALIBRATION: 'Kalibrasyon',
+  FIRE_REPORT: 'Yangın raporu',
+  MAINTENANCE: 'Bakım faturası',
+  OTHER: 'Diğer',
+};
+
+const DOC_EXPIRY_LABELS = {
+  expired: 'Süresi doldu',
+  expiring: 'Yakında doluyor',
+  ok: 'Geçerli',
+  none: 'Tarih yok',
+};
+
+let documentsCache = [];
+let documentsFilter = { category: '', status: '' };
+
+function fmtDocDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('tr-TR');
+}
+
+async function showDocumentsAdmin() {
+  if (!isAdmin()) return toast('Bu menü yalnızca yönetici içindir');
+  setHeaderTitle('Evrak Merkezi');
+  documentsFilter = { category: '', status: '' };
+  document.getElementById('mainContent').innerHTML =
+    pageHeader('Evrak Merkezi', 'showDashboard()') + `
+    <div class="day-close-toolbar">
+      <p class="credit-hint" style="margin:0;flex:1">Ruhsat, sigorta, kalibrasyon ve diğer belgeler. Süre dolunca burada uyarı görünür. Yalnızca yönetici.</p>
+      <button class="btn btn-primary" onclick="openDocumentModal()">+ Evrak</button>
+    </div>
+    <div class="doc-filters" id="docFilters"></div>
+    <div id="docSummary"></div>
+    <div id="docList"><p class="empty">Yükleniyor...</p></div>`;
+  renderDocFilters();
+  await loadDocumentsAdmin();
+}
+
+function renderDocFilters() {
+  const el = document.getElementById('docFilters');
+  if (!el) return;
+  const cats = Object.entries(DOC_CATEGORY_LABELS)
+    .map(([k, v]) =>
+      `<button type="button" class="doc-chip ${documentsFilter.category === k ? 'active' : ''}"
+        onclick="setDocFilter('category','${k}')">${v}</button>`
+    ).join('');
+  el.innerHTML = `
+    <button type="button" class="doc-chip ${!documentsFilter.category ? 'active' : ''}"
+      onclick="setDocFilter('category','')">Tümü</button>
+    ${cats}
+    <span class="doc-filters-sep"></span>
+    <button type="button" class="doc-chip ${documentsFilter.status === 'expired' ? 'active warn' : ''}"
+      onclick="setDocFilter('status','expired')">Süresi dolan</button>
+    <button type="button" class="doc-chip ${documentsFilter.status === 'expiring' ? 'active warn' : ''}"
+      onclick="setDocFilter('status','expiring')">Yaklaşan</button>
+  `;
+}
+
+function setDocFilter(key, value) {
+  if (key === 'category') {
+    documentsFilter.category = documentsFilter.category === value ? '' : value;
+  } else if (key === 'status') {
+    documentsFilter.status = documentsFilter.status === value ? '' : value;
+  }
+  renderDocFilters();
+  void loadDocumentsAdmin();
+}
+
+async function loadDocumentsAdmin() {
+  const list = document.getElementById('docList');
+  const sum = document.getElementById('docSummary');
+  if (!list) return;
+  try {
+    const q = new URLSearchParams();
+    if (documentsFilter.category) q.set('category', documentsFilter.category);
+    if (documentsFilter.status) q.set('status', documentsFilter.status);
+    const data = await api('GET', `/documents${q.toString() ? '?' + q : ''}`);
+    documentsCache = data.documents || [];
+    const s = data.summary || { expired: 0, expiring: 0, total: 0, warnDays: 30 };
+
+    if (sum) {
+      if (s.expired > 0 || s.expiring > 0) {
+        sum.innerHTML = `<div class="doc-alert">
+          ${s.expired > 0 ? `<strong>${s.expired}</strong> belgenin süresi doldu. ` : ''}
+          ${s.expiring > 0 ? `<strong>${s.expiring}</strong> belge ${s.warnDays || 30} gün içinde doluyor.` : ''}
+        </div>`;
+      } else {
+        sum.innerHTML = `<p class="credit-hint" style="margin:0 0 12px">Toplam ${s.total} evrak — süresi yaklaşan yok.</p>`;
+      }
+    }
+
+    if (!documentsCache.length) {
+      list.innerHTML = '<p class="empty">Bu filtrede evrak yok — “+ Evrak” ile ekleyin</p>';
+      return;
+    }
+
+    list.innerHTML = documentsCache.map((doc) => {
+      const status = doc.expiryStatus || 'none';
+      const statusCls = status === 'expired' ? 'expired' : status === 'expiring' ? 'expiring' : 'ok';
+      return `
+      <div class="doc-item ${statusCls}">
+        <div class="doc-item-main">
+          <div class="doc-item-top">
+            <span class="doc-cat">${DOC_CATEGORY_LABELS[doc.category] || doc.category}</span>
+            <span class="doc-status ${statusCls}">${DOC_EXPIRY_LABELS[status] || status}</span>
+          </div>
+          <div class="doc-title">${escHtml(doc.title)}</div>
+          <div class="doc-meta">
+            Bitiş: ${fmtDocDate(doc.expiresAt)}
+            · ${escHtml(doc.fileName || 'dosya')}
+            ${doc.createdBy?.name ? ' · ' + escHtml(doc.createdBy.name) : ''}
+          </div>
+          ${doc.note ? `<div class="doc-note">${escHtml(doc.note)}</div>` : ''}
+        </div>
+        <div class="doc-actions">
+          <button class="btn btn-sm btn-secondary" onclick="viewDocumentFile('${doc.id}')">Aç</button>
+          <button class="btn btn-sm btn-secondary" onclick="openDocumentModalById('${doc.id}')">Düzenle</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteDocument('${doc.id}')">Sil</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<p class="empty">${e.message}</p>`;
+  }
+}
+
+function openDocumentModalById(id) {
+  const doc = documentsCache.find((x) => x.id === id);
+  if (!doc) return toast('Evrak bulunamadı');
+  openDocumentModal(doc);
+}
+
+function openDocumentModal(doc = null) {
+  const isEdit = Boolean(doc);
+  const expVal = doc?.expiresAt ? new Date(doc.expiresAt).toISOString().slice(0, 10) : '';
+  const catOpts = Object.entries(DOC_CATEGORY_LABELS).map(([k, v]) =>
+    `<option value="${k}" ${doc?.category === k ? 'selected' : ''}>${v}</option>`
+  ).join('');
+
+  openModal(isEdit ? 'Evrak Düzenle' : 'Yeni Evrak', `
+    <form id="docForm" autocomplete="off">
+      <div id="docFormError" class="error-msg hidden"></div>
+      <div class="form-group">
+        <label for="docTitle">Başlık *</label>
+        <input type="text" id="docTitle" name="title" value="${escHtml(doc?.title || '')}" placeholder="Örn: Akaryakıt ruhsatı 2026" required>
+      </div>
+      <div class="form-group">
+        <label for="docCategory">Kategori *</label>
+        <select id="docCategory" name="category">${catOpts}</select>
+      </div>
+      <div class="form-group">
+        <label for="docExpires">Bitiş tarihi</label>
+        <input type="date" id="docExpires" name="expiresAt" value="${expVal}">
+        <p class="credit-hint">Boş bırakılabilir. Dolduğunda veya 30 gün kala uyarı çıkar.</p>
+      </div>
+      <div class="form-group">
+        <label for="docNote">Not</label>
+        <textarea id="docNote" name="note" rows="2" placeholder="İsteğe bağlı">${escHtml(doc?.note || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label for="docFile">${isEdit ? 'Yeni dosya (opsiyonel)' : 'Dosya *'}</label>
+        <input type="file" id="docFile" name="file" accept="application/pdf,image/*,.pdf,.heic,.heif" ${isEdit ? '' : 'required'}>
+        <p class="credit-hint">PDF veya görüntü. ${isEdit && doc?.fileName ? 'Mevcut: ' + escHtml(doc.fileName) : 'Maks. 15 MB.'}</p>
+      </div>
+      <div class="modal-footer" style="padding:8px 0 0">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">İptal</button>
+        <button type="submit" class="btn btn-primary" id="docSaveBtn">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
+      </div>
+    </form>
+  `);
+
+  const form = document.getElementById('docForm');
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      void saveDocument(doc?.id || null);
+    });
+  }
+}
+
+async function saveDocument(id) {
+  const errEl = document.getElementById('docFormError');
+  const btn = document.getElementById('docSaveBtn');
+  try {
+    if (errEl) {
+      errEl.classList.add('hidden');
+      errEl.textContent = '';
+    }
+    const title = document.getElementById('docTitle')?.value?.trim() || '';
+    const category = document.getElementById('docCategory')?.value || '';
+    const expiresAt = document.getElementById('docExpires')?.value || '';
+    const note = document.getElementById('docNote')?.value?.trim() || '';
+    const fileInput = document.getElementById('docFile');
+    const file = fileInput?.files?.[0];
+
+    if (!title) throw new Error('Başlık zorunlu');
+    if (!category) throw new Error('Kategori seçin');
+    if (!id && !file) throw new Error('Dosya gerekli');
+
+    const fd = new FormData();
+    fd.append('title', title);
+    fd.append('category', category);
+    fd.append('note', note);
+    fd.append('expiresAt', expiresAt);
+    if (file) fd.append('file', file);
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Kaydediliyor...';
+    }
+
+    if (id) {
+      await api('PATCH', `/documents/${id}`, fd, true);
+      toast('Evrak güncellendi');
+    } else {
+      await api('POST', '/documents', fd, true);
+      toast('Evrak eklendi');
+    }
+    closeModal();
+    await loadDocumentsAdmin();
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = e.message || 'Kayıt başarısız';
+      errEl.classList.remove('hidden');
+    }
+    toast(e.message || 'Kayıt başarısız');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = id ? 'Güncelle' : 'Kaydet';
+    }
+  }
+}
+
+async function viewDocumentFile(id) {
+  try {
+    const res = await fetch(`${API}/documents/${id}/file`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Dosya açılamadı');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const mime = blob.type || '';
+    if (mime.startsWith('image/')) {
+      openModal('Evrak', `
+        <img class="receipt-full receipt-zoom" src="${url}" alt="Evrak"
+          onclick="window.open('${url}','_blank')">
+        <p class="credit-hint" style="text-align:center;margin-top:8px">Büyütmek için tıklayın ·
+          <a href="${url}" download>İndir</a></p>
+      `);
+      document.getElementById('modalBox')?.classList.add('modal-wide');
+    } else {
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
+  } catch (e) {
+    toast(e.message || 'Dosya açılamadı');
+  }
+}
+
+async function deleteDocument(id) {
+  if (!confirm('Bu evrak silinsin mi?')) return;
+  try {
+    await api('DELETE', `/documents/${id}`);
+    toast('Evrak silindi');
+    await loadDocumentsAdmin();
+  } catch (e) {
+    toast(e.message || 'Silinemedi');
+  }
+}
+
+window.showDocumentsAdmin = showDocumentsAdmin;
+window.setDocFilter = setDocFilter;
+window.openDocumentModal = openDocumentModal;
+window.openDocumentModalById = openDocumentModalById;
+window.viewDocumentFile = viewDocumentFile;
+window.deleteDocument = deleteDocument;
 
 // ===== ANNOUNCEMENTS / DUYURULAR (ADMIN) =====
 let announcementsCache = [];
