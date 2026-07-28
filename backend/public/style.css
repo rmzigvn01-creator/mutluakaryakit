@@ -1272,32 +1272,23 @@ body {
   }
 
   .login-main {
-    flex: 1 1 720px;
+    flex: 0 1 860px;
     max-width: 860px;
-    flex-direction: row;
-    align-items: stretch;
-    gap: 24px;
-    justify-content: center;
   }
 
   .login-qr-panel {
-    flex: 0 1 360px;
-    max-width: 360px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    border-radius: 18px;
-    padding: 28px 24px 22px;
+    flex: 0 0 320px;
+    width: 320px;
+    padding: 32px 24px 24px;
   }
 
-  .login-box {
-    flex: 0 1 400px;
-    max-width: 400px;
-    width: 100%;
+  .login-main .login-box {
+    flex: 1 1 auto;
+    max-width: none;
+    width: auto;
     margin: 0;
     padding: 40px 36px;
-    border-radius: 18px;
+    border-radius: 0;
   }
 
   .login-footer {
@@ -1421,8 +1412,8 @@ body {
   }
 
   .login-box {
-    flex-basis: 460px;
-    max-width: 460px;
+    flex-basis: auto;
+    max-width: none;
   }
 
   .login-top-brand .po-dealer-name { font-size: 48px; }
@@ -1784,67 +1775,93 @@ body {
 }
 
 /* ===== SHIFT QR (giriş ekranı kiosk) ===== */
+/* Tek kart: QR solda, form sağda */
 .login-main {
   position: relative;
   z-index: 1;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
   width: 100%;
-  max-width: 420px;
-}
-
-.login-qr-panel {
+  max-width: 860px;
   background: #fff;
-  border-radius: 16px;
-  padding: 22px 20px 18px;
-  width: 100%;
-  text-align: center;
+  border-radius: 18px;
+  overflow: hidden;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.25);
 }
 
+.login-qr-panel {
+  flex: 0 0 300px;
+  width: 300px;
+  background: #fafafa;
+  border-right: 1px solid var(--po-border);
+  border-radius: 0;
+  padding: 28px 22px 22px;
+  text-align: center;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
 .login-qr-label {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--po-black);
   letter-spacing: -0.02em;
 }
 
 .login-qr-sub {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--po-gray);
   margin-top: 6px;
   line-height: 1.45;
   font-weight: 500;
+  max-width: 240px;
 }
 
 .login-qr-wrap {
-  margin: 12px auto 4px;
+  margin: 14px auto 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 280px;
+  min-height: 220px;
+  padding: 10px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--po-border);
 }
 
 .login-qr-img {
   display: block;
-  width: 280px;
-  height: 280px;
+  width: 220px;
+  height: 220px;
   max-width: 100%;
   object-fit: contain;
 }
 
 .login-qr-status {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--po-gray);
-  margin-top: 2px;
+  margin-top: 4px;
   font-weight: 600;
 }
 
 .login-qr-panel .shift-qr-timer {
-  margin-top: 2px;
-  font-size: 34px;
+  margin-top: 4px;
+  font-size: 28px;
+}
+
+.login-main .login-box {
+  flex: 1 1 auto;
+  max-width: none;
+  width: auto;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 36px 32px;
 }
 
 .login-qr-btn {
@@ -1858,6 +1875,20 @@ body {
   text-align: center;
   line-height: 1.4;
   font-weight: 500;
+}
+
+/* Dar ekran (telefon): QR gizle — işyeri PC’de yan yana kalır */
+@media (max-width: 720px) {
+  .login-qr-panel {
+    display: none;
+  }
+  .login-main {
+    max-width: 420px;
+    flex-direction: column;
+  }
+  .login-main .login-box {
+    padding: 32px 28px;
+  }
 }
 .shift-qr-kiosk {
   text-align: center;

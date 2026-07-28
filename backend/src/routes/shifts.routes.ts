@@ -132,7 +132,7 @@ router.post("/start", requireRoles(UserRole.STAFF, UserRole.ADMIN), async (req: 
   if (!qrToken || !verifyShiftQrToken(qrToken, req.user!.stationId)) {
     res.status(400).json({
       error:
-        "Geçersiz veya süresi dolmuş QR. Yalnızca işyeri bilgisayarındaki güncel kod kabul edilir (30 sn).",
+        "Geçersiz veya süresi dolmuş QR. Yalnızca ekrandaki güncel kod geçerli; eski fotoğraf kabul edilmez.",
     });
     return;
   }

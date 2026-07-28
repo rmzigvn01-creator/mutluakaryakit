@@ -507,10 +507,11 @@ function stopShiftQrScanner() {
 
 async function renderQrPayload(payload, imgEl, canvasEl) {
   if (!payload) throw new Error('QR içerik yok');
+  const size = 220;
   // 1) qrcode lib → data URL
   if (typeof QRCode !== 'undefined' && typeof QRCode.toDataURL === 'function') {
     const url = await QRCode.toDataURL(payload, {
-      width: 280,
+      width: size,
       margin: 2,
       color: { dark: '#111111', light: '#ffffff' },
     });
@@ -518,6 +519,7 @@ async function renderQrPayload(payload, imgEl, canvasEl) {
       imgEl.src = url;
       imgEl.classList.remove('hidden');
     }
+    if (canvasEl) canvasEl.classList.add('hidden');
     return;
   }
   // 2) canvas
@@ -525,7 +527,7 @@ async function renderQrPayload(payload, imgEl, canvasEl) {
     canvasEl.classList.remove('hidden');
     if (imgEl) imgEl.classList.add('hidden');
     await QRCode.toCanvas(canvasEl, payload, {
-      width: 280,
+      width: size,
       margin: 2,
       color: { dark: '#111111', light: '#ffffff' },
     });
@@ -533,7 +535,7 @@ async function renderQrPayload(payload, imgEl, canvasEl) {
   }
   // 3) harici görsel (yedek — kod görünsün)
   if (imgEl) {
-    imgEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(payload)}`;
+    imgEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(payload)}`;
     imgEl.classList.remove('hidden');
     if (canvasEl) canvasEl.classList.add('hidden');
   }
@@ -548,6 +550,18 @@ async function startLoginScreenQr() {
   const imgEl = document.getElementById('loginQrImg');
   const canvasEl = document.getElementById('loginQrCanvas');
 
+  const clearDisplayedQr = () => {
+    if (imgEl) {
+      imgEl.removeAttribute('src');
+      imgEl.classList.add('hidden');
+    }
+    if (canvasEl) {
+      const ctx = canvasEl.getContext?.('2d');
+      if (ctx) ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+      canvasEl.classList.add('hidden');
+    }
+  };
+
   const refresh = async () => {
     if (!loginQrActive || shiftQrRefreshLock) return;
     shiftQrRefreshLock = true;
@@ -558,8 +572,8 @@ async function startLoginScreenQr() {
       await renderQrPayload(data.payload || data.token, imgEl, canvasEl);
       if (statusEl) {
         statusEl.textContent = data.stationName
-          ? `${data.stationName} · güncel kod`
-          : 'Güncel kod aktif';
+          ? `${data.stationName} · yalnızca bu kod`
+          : 'Yalnızca bu kod geçerli';
       }
       const ends = new Date(data.expiresAt).getTime();
       if (shiftQrPollTimer) clearInterval(shiftQrPollTimer);
@@ -573,13 +587,16 @@ async function startLoginScreenQr() {
         if (left <= 0) {
           clearInterval(shiftQrPollTimer);
           shiftQrPollTimer = null;
+          // Süresi biten kodu hemen kaldır — fotoğraflanan eski kod ekranda kalmasın
+          clearDisplayedQr();
+          if (statusEl) statusEl.textContent = 'Yenileniyor…';
           void refresh();
         }
       }, 250);
     } catch (e) {
+      clearDisplayedQr();
       if (statusEl) statusEl.textContent = e.message || 'QR yüklenemedi';
       if (timerEl) timerEl.textContent = '!';
-      // 5 sn sonra tekrar dene
       setTimeout(() => { if (loginQrActive) void refresh(); }, 5000);
     } finally {
       shiftQrRefreshLock = false;

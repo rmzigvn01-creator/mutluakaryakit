@@ -37,8 +37,8 @@ export function createShiftQrToken(stationId: string, now = Date.now()): {
 }
 
 /**
- * Token doğrula. Saat kayması için mevcut + bir önceki pencere kabul edilir.
- * Eski ekran görüntüsü / kopyalanmış QR böylece geçersiz kalır.
+ * Token doğrula — yalnızca şu anki 30 sn penceresi.
+ * Önceki pencere / fotoğraf / ekran görüntüsü reddedilir.
  */
 export function verifyShiftQrToken(
   rawToken: string,
@@ -56,8 +56,7 @@ export function verifyShiftQrToken(
   if (!Number.isFinite(window)) return false;
 
   const current = shiftQrWindow(now);
-  // Sadece şu anki ve bir önceki 30 sn penceresi
-  if (window !== current && window !== current - 1) return false;
+  if (window !== current) return false;
   const expected = signWindow(stationId, window);
   try {
     return (

@@ -121,7 +121,7 @@ router.post("/login-shift", async (req, res) => {
   if (!verifyShiftQrToken(qrToken, user.stationId)) {
     res.status(400).json({
       error:
-        "Geçersiz veya süresi dolmuş QR. İşyeri ekranındaki güncel kodu okutun (30 sn).",
+        "Geçersiz veya süresi dolmuş QR. Ekrandaki güncel kodu okutun; eski fotoğraf kabul edilmez.",
     });
     return;
   }
