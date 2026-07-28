@@ -13,6 +13,38 @@ import { createShiftQrToken, verifyShiftQrToken } from "../lib/shift-qr.js";
 
 const router = Router();
 
+/**
+ * Giriş ekranı (işyeri PC) — oturum gerekmez.
+ * Tek istasyon varsayımı; STATION_ID env ile sabitlenebilir.
+ */
+router.get("/public-qr", async (_req, res) => {
+  try {
+    const stationId = process.env.STATION_ID?.trim() || null;
+    const station = stationId
+      ? await prisma.station.findUnique({ where: { id: stationId }, select: { id: true, name: true } })
+      : await prisma.station.findFirst({ select: { id: true, name: true }, orderBy: { createdAt: "asc" } });
+
+    if (!station) {
+      res.status(404).json({ error: "İstasyon bulunamadı" });
+      return;
+    }
+
+    const issued = createShiftQrToken(station.id);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      token: issued.token,
+      payload: issued.token,
+      expiresAt: new Date(issued.expiresAt).toISOString(),
+      expiresInMs: issued.expiresInMs,
+      windowMs: 30_000,
+      stationName: station.name,
+    });
+  } catch (err) {
+    console.error("public-qr failed", err);
+    res.status(500).json({ error: "QR üretilemedi" });
+  }
+});
+
 router.use(authMiddleware);
 
 async function buildShiftSummary(shiftId: string) {

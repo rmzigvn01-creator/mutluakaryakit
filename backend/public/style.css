@@ -1231,19 +1231,19 @@ body {
       radial-gradient(ellipse at top, #fafafa 0%, var(--po-bg) 55%);
   }
 
-  /* Giriş: marka + form yan yana, ortalanmış (kenara yapışmaz) */
+  /* Giriş: marka | QR + form — işyeri PC sürekli bu ekranda */
   .login-screen {
     flex-direction: row;
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
     padding: 48px 40px 64px;
-    gap: 56px 72px;
+    gap: 40px 48px;
     position: relative;
   }
 
   .login-top-brand {
-    flex: 0 1 380px;
+    flex: 0 1 320px;
     margin: 0;
     display: flex;
     flex-direction: column;
@@ -1271,9 +1271,29 @@ body {
     max-width: 14ch;
   }
 
+  .login-main {
+    flex: 1 1 720px;
+    max-width: 860px;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 24px;
+    justify-content: center;
+  }
+
+  .login-qr-panel {
+    flex: 0 1 360px;
+    max-width: 360px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 18px;
+    padding: 28px 24px 22px;
+  }
+
   .login-box {
-    flex: 0 1 440px;
-    max-width: 440px;
+    flex: 0 1 400px;
+    max-width: 400px;
     width: 100%;
     margin: 0;
     padding: 40px 36px;
@@ -1763,7 +1783,70 @@ body {
   line-height: 1.35;
 }
 
-/* ===== SHIFT QR ===== */
+/* ===== SHIFT QR (giriş ekranı kiosk) ===== */
+.login-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.login-qr-panel {
+  background: #fff;
+  border-radius: 16px;
+  padding: 22px 20px 18px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.25);
+}
+
+.login-qr-label {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--po-black);
+  letter-spacing: -0.02em;
+}
+
+.login-qr-sub {
+  font-size: 12px;
+  color: var(--po-gray);
+  margin-top: 6px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.login-qr-wrap {
+  margin: 12px auto 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+}
+
+.login-qr-img {
+  display: block;
+  width: 280px;
+  height: 280px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.login-qr-status {
+  font-size: 12px;
+  color: var(--po-gray);
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+.login-qr-panel .shift-qr-timer {
+  margin-top: 2px;
+  font-size: 34px;
+}
+
 .login-qr-btn {
   width: 100%;
   margin-top: 10px;
