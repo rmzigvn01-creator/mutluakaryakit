@@ -364,6 +364,7 @@ async function doLogin() {
 }
 
 function doLogout() {
+  stopChatPoll();
   token = null;
   currentUser = null;
   localStorage.removeItem('token');
@@ -536,6 +537,7 @@ async function showShiftDetail(shiftId) {
 }
 
 async function showHome() {
+  stopChatPoll();
   setHeaderTitle('Ana Menü');
   const isAdmin = currentUser.role === 'ADMIN';
   const isStaff = currentUser.role === 'STAFF';
@@ -567,6 +569,7 @@ async function showHome() {
   }
   html += menuCard('🧾', 'İşlem Listesi', 'Tüm satış ve ödeme kayıtları', 'showTransactions()');
   html += menuCard('⏱', 'Vardiya Raporları', 'Pompacı vardiya geçmişi', 'showShifts()');
+  html += menuCard('💬', 'Sohbet', 'Ekip içi mesajlaşma', 'showChat()');
 
   if (isAccountant && !isAdmin) {
     html += menuCard('🌙', 'Gün Sonu Raporu', 'Günlük kapanış özeti ve indirme', 'showDayClose()');
@@ -596,6 +599,156 @@ function renderAnnouncementsHome(list) {
       </div>
     `).join('')}
   </div>`;
+}
+
+// ===== CHAT / SOHBET =====
+let chatPollTimer = null;
+let chatLastId = null;
+let chatSending = false;
+
+function stopChatPoll() {
+  if (chatPollTimer) {
+    clearInterval(chatPollTimer);
+    chatPollTimer = null;
+  }
+}
+
+function formatChatTime(d) {
+  const dt = new Date(d);
+  const now = new Date();
+  const sameDay = istanbulDateKey(dt) === istanbulDateKey(now);
+  const time = dt.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return time;
+  return dt.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' }) + ' ' + time;
+}
+
+function renderChatBubble(m) {
+  const mine = m.user?.id === currentUser.id;
+  const role = ROLE_LABELS[m.user?.role] || m.user?.role || '';
+  const canDelete = mine || isAdmin();
+  return `<div class="chat-row${mine ? ' mine' : ''}" data-id="${m.id}">
+    <div class="chat-bubble">
+      ${mine ? '' : `<div class="chat-meta">${escHtml(m.user?.name || '?')} · ${escHtml(role)}</div>`}
+      <div class="chat-text">${escHtml(m.body).replace(/\n/g, '<br>')}</div>
+      <div class="chat-time">
+        ${formatChatTime(m.createdAt)}
+        ${canDelete ? `<button type="button" class="chat-del" onclick="deleteChatMessage('${m.id}')" title="Sil">✕</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function appendChatMessages(messages, { prepend = false } = {}) {
+  const box = document.getElementById('chatMessages');
+  if (!box || !messages?.length) return;
+  const html = messages.map(renderChatBubble).join('');
+  if (prepend) {
+    const prevHeight = box.scrollHeight;
+    box.insertAdjacentHTML('afterbegin', html);
+    box.scrollTop = box.scrollHeight - prevHeight;
+  } else {
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    box.insertAdjacentHTML('beforeend', html);
+    if (nearBottom) box.scrollTop = box.scrollHeight;
+  }
+  const last = messages[messages.length - 1];
+  if (last) chatLastId = last.id;
+}
+
+async function showChat() {
+  stopChatPoll();
+  chatLastId = null;
+  setHeaderTitle('Sohbet');
+  document.getElementById('mainContent').innerHTML =
+    pageHeader('Sohbet') + `
+    <div class="chat-shell">
+      <div class="chat-hint">İstasyon ekibi — pompacı, muhasebe ve yönetici burada yazışır.</div>
+      <div id="chatMessages" class="chat-messages"><p class="empty">Yükleniyor...</p></div>
+      <div class="chat-composer">
+        <textarea id="chatInput" rows="2" maxlength="1000" placeholder="Mesaj yaz..."
+          onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+        <button class="btn btn-primary" id="chatSendBtn" onclick="sendChatMessage()">Gönder</button>
+      </div>
+    </div>`;
+
+  try {
+    const data = await api('GET', '/chat?limit=50');
+    const box = document.getElementById('chatMessages');
+    const list = data.messages || [];
+    if (!list.length) {
+      box.innerHTML = '<p class="empty chat-empty">Henüz mesaj yok — ilk yazıyı sen at</p>';
+    } else {
+      box.innerHTML = list.map(renderChatBubble).join('');
+      chatLastId = list[list.length - 1].id;
+      box.scrollTop = box.scrollHeight;
+    }
+  } catch (e) {
+    document.getElementById('chatMessages').innerHTML = `<p class="empty">${e.message}</p>`;
+  }
+
+  chatPollTimer = setInterval(pollChatMessages, 3500);
+}
+
+async function pollChatMessages() {
+  if (!document.getElementById('chatMessages') || !chatLastId) {
+    if (document.getElementById('chatMessages') && !chatLastId) {
+      try {
+        const data = await api('GET', '/chat?limit=50');
+        const list = data.messages || [];
+        if (list.length) {
+          const box = document.getElementById('chatMessages');
+          box.innerHTML = list.map(renderChatBubble).join('');
+          chatLastId = list[list.length - 1].id;
+          box.scrollTop = box.scrollHeight;
+        }
+      } catch { /* ignore poll errors */ }
+    }
+    return;
+  }
+  try {
+    const data = await api('GET', `/chat?after=${encodeURIComponent(chatLastId)}&limit=50`);
+    const list = data.messages || [];
+    if (!list.length) return;
+    const empty = document.querySelector('#chatMessages .chat-empty');
+    if (empty) empty.remove();
+    appendChatMessages(list);
+  } catch { /* ignore */ }
+}
+
+async function sendChatMessage() {
+  if (chatSending) return;
+  const input = document.getElementById('chatInput');
+  const btn = document.getElementById('chatSendBtn');
+  if (!input) return;
+  const body = input.value.trim();
+  if (!body) return toast('Mesaj boş olamaz');
+
+  chatSending = true;
+  if (btn) btn.disabled = true;
+  try {
+    const data = await api('POST', '/chat', { body });
+    input.value = '';
+    const empty = document.querySelector('#chatMessages .chat-empty, #chatMessages .empty');
+    if (empty) empty.remove();
+    appendChatMessages([data.message]);
+    document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    chatSending = false;
+    if (btn) btn.disabled = false;
+    input.focus();
+  }
+}
+
+async function deleteChatMessage(id) {
+  if (!confirm('Mesaj silinsin mi?')) return;
+  try {
+    await api('DELETE', `/chat/${id}`);
+    const row = document.querySelector(`.chat-row[data-id="${id}"]`);
+    if (row) row.remove();
+    toast('Mesaj silindi');
+  } catch (e) { toast(e.message); }
 }
 
 async function loadFuelPriceCard() {

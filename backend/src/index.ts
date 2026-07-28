@@ -18,6 +18,7 @@ import expenseRoutes from "./routes/expense.routes.js";
 import vehicleRoutes from "./routes/vehicles.routes.js";
 import fuelPriceRoutes from "./routes/fuel-prices.routes.js";
 import announcementRoutes from "./routes/announcements.routes.js";
+import chatRoutes from "./routes/chat.routes.js";
 import { refreshFuelPrices, startFuelPricePoller } from "./services/fuel-price.service.js";
 import { startPendingOcrRecovery } from "./services/ocr-queue.service.js";
 import { backfillUsernames } from "./lib/backfill-usernames.js";
@@ -48,6 +49,7 @@ app.use("/api/expenses", expenseRoutes);
 app.use("/api/vehicles", vehicleRoutes);
 app.use("/api/fuel-prices", fuelPriceRoutes);
 app.use("/api/announcements", announcementRoutes);
+app.use("/api/chat", chatRoutes);
 
 app.use(express.static(path.join(__dirname, "../public"), {
   etag: true,

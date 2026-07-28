@@ -64,6 +64,19 @@ model Station {
   suppliers     Supplier[]
   vehicles      CompanyVehicle[]
   announcements Announcement[]
+  chatMessages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([stationId, createdAt])
 }
 
 model Announcement {
@@ -219,6 +232,7 @@ model User {
   pushDevices          PushDevice[]
   appNotifications     AppNotification[]
   announcements        Announcement[]      @relation("AnnouncementCreatedBy")
+  chatMessages         ChatMessage[]
 
   @@index([stationId, role, isActive])
 }
