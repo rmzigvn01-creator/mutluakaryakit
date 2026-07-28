@@ -615,11 +615,18 @@ function stopChatPoll() {
 
 function formatChatTime(d) {
   const dt = new Date(d);
-  const now = new Date();
-  const sameDay = istanbulDateKey(dt) === istanbulDateKey(now);
-  const time = dt.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-  if (sameDay) return time;
-  return dt.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' }) + ' ' + time;
+  const date = dt.toLocaleDateString('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const time = dt.toLocaleTimeString('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `${date} ${time}`;
 }
 
 function renderChatBubble(m) {
