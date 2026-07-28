@@ -334,7 +334,7 @@ function showLogin() {
 function showApp() {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
-  document.getElementById('userName').textContent =
+  document.getElementById('headerUserLabel').textContent =
     `${currentUser.name} · ${ROLE_LABELS[currentUser.role] || currentUser.role}`;
   updatePendingBadge();
   showHome();
