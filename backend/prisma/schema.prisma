@@ -54,15 +54,31 @@ enum ShiftStatus {
 }
 
 model Station {
-  id           String           @id @default(uuid())
-  name         String
-  createdAt    DateTime         @default(now())
-  users        User[]
-  transactions Transaction[]
-  shifts       Shift[]
-  customers    Customer[]
-  suppliers    Supplier[]
-  vehicles     CompanyVehicle[]
+  id            String           @id @default(uuid())
+  name          String
+  createdAt     DateTime         @default(now())
+  users         User[]
+  transactions  Transaction[]
+  shifts        Shift[]
+  customers     Customer[]
+  suppliers     Supplier[]
+  vehicles      CompanyVehicle[]
+  announcements Announcement[]
+}
+
+model Announcement {
+  id          String   @id @default(uuid())
+  stationId   String
+  station     Station  @relation(fields: [stationId], references: [id])
+  title       String
+  body        String
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdBy   User?    @relation("AnnouncementCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([stationId, isActive, createdAt])
 }
 
 model Customer {
@@ -202,6 +218,7 @@ model User {
   shifts               Shift[]
   pushDevices          PushDevice[]
   appNotifications     AppNotification[]
+  announcements        Announcement[]      @relation("AnnouncementCreatedBy")
 
   @@index([stationId, role, isActive])
 }

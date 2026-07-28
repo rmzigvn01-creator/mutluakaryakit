@@ -541,15 +541,18 @@ async function showHome() {
   const isStaff = currentUser.role === 'STAFF';
   const isAccountant = currentUser.role === 'ACCOUNTANT';
 
-  // Vardiya + menüyü hemen çiz; fiyat kartı paralel yüklensin
   const shiftPromise = (isStaff || isAdmin) ? loadCurrentShift() : Promise.resolve({ shift: null });
-  const shiftData = await shiftPromise;
+  const [shiftData, announcements] = await Promise.all([
+    shiftPromise,
+    api('GET', '/announcements').then(d => d.announcements || []).catch(() => []),
+  ]);
 
   let html = `
     <div class="welcome-banner">
-      <h2>Hoş geldiniz, ${currentUser.name.split(' ')[0]}</h2>
+      <h2>Hoş geldiniz, ${escHtml(currentUser.name.split(' ')[0])}</h2>
       <p>Petrol Ofisi · Mutlu Akaryakıt · ${ROLE_LABELS[currentUser.role]}</p>
     </div>
+    ${renderAnnouncementsHome(announcements)}
     ${renderShiftBanner(shiftData)}
     <div id="fuelPriceCard"><p class="empty" style="padding:12px">Fiyatlar yükleniyor...</p></div>
     <p class="section-label">Menü</p>
@@ -571,6 +574,7 @@ async function showHome() {
 
   if (isAdmin) {
     html += menuCard('📊', 'Yönetici Paneli', 'Günlük özet ve istatistikler', 'showDashboard()');
+    html += menuCard('📢', 'Duyurular', 'Kurallar ve duyuru yayınla', 'showAnnouncementsAdmin()');
     html += menuCard('👤', 'Üyeler', 'Pompacı / muhasebeci ekle', 'showUsers()');
     html += menuCard('📒', 'Veresiye', 'Müşteri borçları ve tahsilat', 'showCreditCustomers()');
     html += menuCard('🚗', 'Şirket Araçları', 'Araç yakıt takibi', 'showVehicles()');
@@ -590,6 +594,19 @@ async function showHome() {
   html += '</div>';
   document.getElementById('mainContent').innerHTML = html;
   void loadFuelPriceCard();
+}
+
+function renderAnnouncementsHome(list) {
+  if (!list || !list.length) return '';
+  return `<div class="announcement-home" role="region" aria-label="Duyurular">
+    <div class="announcement-home-label">Duyurular</div>
+    ${list.map(a => `
+      <div class="announcement-home-item">
+        <div class="announcement-home-title">${escHtml(a.title)}</div>
+        <div class="announcement-home-body">${escHtml(a.body).replace(/\n/g, '<br>')}</div>
+      </div>
+    `).join('')}
+  </div>`;
 }
 
 async function loadFuelPriceCard() {
@@ -1305,6 +1322,7 @@ async function showDashboard() {
         <div class="stat-card"><div class="label">Onay Bekleyen</div><div class="value">${d.pendingCorrections}</div></div>
       </div>
       <div class="menu-grid">
+        ${menuCard('📢','Duyurular','Kurallar ve duyuru yayınla','showAnnouncementsAdmin()')}
         ${menuCard('👤','Üyeler','Pompacı / muhasebeci ekle','showUsers()')}
         ${menuCard('📒','Veresiye','Müşteri borç / tahsilat','showCreditCustomers()')}
         ${menuCard('🚗','Şirket Araçları','Araç yakıt takibi','showVehicles()')}
@@ -1318,6 +1336,115 @@ async function showDashboard() {
   } catch (e) {
     document.getElementById('dashContent').innerHTML = `<p class="empty">${e.message}</p>`;
   }
+}
+
+// ===== ANNOUNCEMENTS / DUYURULAR (ADMIN) =====
+let announcementsCache = [];
+
+async function showAnnouncementsAdmin() {
+  if (!isAdmin()) return toast('Bu menü yalnızca yönetici içindir');
+  setHeaderTitle('Duyurular');
+  document.getElementById('mainContent').innerHTML =
+    pageHeader('Duyurular', 'showDashboard()') + `
+    <div class="day-close-toolbar">
+      <p class="credit-hint" style="margin:0;flex:1">Aktif duyurular ana sayfada turuncu kutuda görünür.</p>
+      <button class="btn btn-primary" onclick="openAnnouncementModal()">+ Duyuru</button>
+    </div>
+    <div id="annList"><p class="empty">Yükleniyor...</p></div>`;
+
+  try {
+    const data = await api('GET', '/announcements/manage');
+    announcementsCache = data.announcements || [];
+    const list = document.getElementById('annList');
+    if (!announcementsCache.length) {
+      list.innerHTML = '<p class="empty">Henüz duyuru yok — “+ Duyuru” ile ekleyin</p>';
+      return;
+    }
+    list.innerHTML = announcementsCache.map(a => `
+      <div class="tx-item${!a.isActive ? ' suspicious' : ''}">
+        <div class="tx-header">
+          <div>
+            <div class="tx-amount">${escHtml(a.title)}</div>
+            <div class="tx-type">${fmtDate(a.createdAt)}${a.createdBy?.name ? ' · ' + escHtml(a.createdBy.name) : ''}</div>
+          </div>
+          <span class="tx-badge ${a.isActive ? 'normal' : 'suspicious'}">${a.isActive ? 'Yayında' : 'Pasif'}</span>
+        </div>
+        <div class="tx-meta" style="white-space:pre-wrap">${escHtml(a.body)}</div>
+        <div class="tx-actions">
+          <button class="btn btn-sm btn-secondary" onclick="openAnnouncementModalById('${a.id}')">Düzenle</button>
+          <button class="btn btn-sm btn-warning" onclick="toggleAnnouncement('${a.id}', ${!a.isActive})">${a.isActive ? 'Pasifleştir' : 'Yayınla'}</button>
+          <button class="btn btn-sm btn-ghost" onclick="deleteAnnouncement('${a.id}')">Sil</button>
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('annList').innerHTML = `<p class="empty">${e.message}</p>`;
+  }
+}
+
+function openAnnouncementModalById(id) {
+  const a = announcementsCache.find(x => x.id === id);
+  if (!a) return toast('Duyuru bulunamadı');
+  openAnnouncementModal(a);
+}
+
+function openAnnouncementModal(ann = null) {
+  const isEdit = Boolean(ann);
+  openModal(isEdit ? 'Duyuru Düzenle' : 'Yeni Duyuru', `
+    <div class="form-group">
+      <label>Başlık *</label>
+      <input type="text" id="annTitle" value="${escHtml(ann?.title || '')}" placeholder="Örn: Vardiya kuralları" maxlength="120">
+    </div>
+    <div class="form-group">
+      <label>Duyuru metni *</label>
+      <textarea id="annBody" rows="6" placeholder="Kurallar, hatırlatmalar...">${escHtml(ann?.body || '')}</textarea>
+    </div>
+    ${isEdit ? `
+    <div class="form-group">
+      <label>Durum</label>
+      <select id="annActive">
+        <option value="true" ${ann.isActive ? 'selected' : ''}>Yayında</option>
+        <option value="false" ${!ann.isActive ? 'selected' : ''}>Pasif</option>
+      </select>
+    </div>` : ''}
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">İptal</button>
+    <button class="btn btn-primary" onclick="${isEdit ? `saveAnnouncement('${ann.id}')` : 'saveAnnouncement()'}">${isEdit ? 'Güncelle' : 'Yayınla'}</button>
+  `);
+}
+
+async function saveAnnouncement(id) {
+  const title = document.getElementById('annTitle').value.trim();
+  const body = document.getElementById('annBody').value.trim();
+  if (!title || !body) return toast('Başlık ve metin zorunlu');
+  try {
+    if (id) {
+      const isActive = document.getElementById('annActive').value === 'true';
+      await api('PATCH', `/announcements/${id}`, { title, body, isActive });
+      toast('Duyuru güncellendi');
+    } else {
+      await api('POST', '/announcements', { title, body, isActive: true });
+      toast('Duyuru yayınlandı');
+    }
+    closeModal();
+    showAnnouncementsAdmin();
+  } catch (e) { toast(e.message); }
+}
+
+async function toggleAnnouncement(id, isActive) {
+  try {
+    await api('PATCH', `/announcements/${id}`, { isActive });
+    toast(isActive ? 'Duyuru yayınlandı' : 'Duyuru pasifleştirildi');
+    showAnnouncementsAdmin();
+  } catch (e) { toast(e.message); }
+}
+
+async function deleteAnnouncement(id) {
+  if (!confirm('Bu duyuru silinsin mi?')) return;
+  try {
+    await api('DELETE', `/announcements/${id}`);
+    toast('Duyuru silindi');
+    showAnnouncementsAdmin();
+  } catch (e) { toast(e.message); }
 }
 
 // ===== USERS / ÜYELER (ADMIN) =====
