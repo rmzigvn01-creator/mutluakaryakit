@@ -62,6 +62,12 @@ enum DocumentCategory {
   OTHER
 }
 
+enum WorkOrderStatus {
+  OPEN
+  DONE
+  CANCELLED
+}
+
 model Station {
   id            String           @id @default(uuid())
   name          String
@@ -75,6 +81,7 @@ model Station {
   announcements Announcement[]
   chatMessages  ChatMessage[]
   documents     StationDocument[]
+  workOrders    WorkOrder[]
 }
 
 model ChatMessage {
@@ -244,8 +251,31 @@ model User {
   announcements        Announcement[]      @relation("AnnouncementCreatedBy")
   chatMessages         ChatMessage[]
   documents            StationDocument[]   @relation("DocumentCreatedBy")
+  workOrdersCreated    WorkOrder[]         @relation("WorkOrderCreatedBy")
+  workOrdersCompleted  WorkOrder[]         @relation("WorkOrderCompletedBy")
 
   @@index([stationId, role, isActive])
+}
+
+model WorkOrder {
+  id            String          @id @default(uuid())
+  stationId     String
+  station       Station         @relation(fields: [stationId], references: [id])
+  title         String
+  note          String?
+  status        WorkOrderStatus @default(OPEN)
+  createdById   String
+  createdBy     User            @relation("WorkOrderCreatedBy", fields: [createdById], references: [id])
+  completedById String?
+  completedBy   User?           @relation("WorkOrderCompletedBy", fields: [completedById], references: [id])
+  completedAt   DateTime?
+  photoPath     String?
+  photoMime     String?
+  photoName     String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([stationId, status, createdAt])
 }
 
 model StationDocument {

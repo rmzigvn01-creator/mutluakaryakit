@@ -1699,3 +1699,66 @@ body {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* ===== IS EMIRLERI ===== */
+.wo-item {
+  background: #fff;
+  border: 1.5px solid var(--po-border);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wo-item.open { border-color: #FFCC80; background: #FFFBF5; }
+.wo-item.done { border-color: #A5D6A7; background: #F5FFF6; }
+.wo-item.cancelled { opacity: .75; }
+.wo-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.wo-status {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.wo-status.open { background: #FFF3E0; color: #E65100; }
+.wo-status.done { background: #E8F5E9; color: #2E7D32; }
+.wo-status.cancelled { background: #EEEEEE; color: #757575; }
+.wo-date { font-size: 11px; color: var(--po-gray); font-weight: 600; }
+.wo-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--po-black);
+  line-height: 1.35;
+}
+.wo-note {
+  font-size: 13px;
+  color: var(--po-gray);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+.wo-meta {
+  font-size: 12px;
+  color: var(--po-gray);
+  margin-top: 8px;
+  font-weight: 500;
+}
+.wo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wo-complete-title {
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  line-height: 1.35;
+}

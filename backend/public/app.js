@@ -582,10 +582,13 @@ async function showHome() {
   const isAccountant = currentUser.role === 'ACCOUNTANT';
 
   const shiftPromise = (isStaff || isAdmin) ? loadCurrentShift() : Promise.resolve({ shift: null });
-  const [shiftData, announcements] = await Promise.all([
+  const [shiftData, announcements, woMeta] = await Promise.all([
     shiftPromise,
     api('GET', '/announcements').then(d => d.announcements || []).catch(() => []),
+    api('GET', '/work-orders?status=OPEN').then(d => d.summary || { openCount: 0 }).catch(() => ({ openCount: 0 })),
   ]);
+
+  const openOrders = woMeta.openCount || 0;
 
   let html = `
     <div class="welcome-banner">
@@ -605,6 +608,13 @@ async function showHome() {
       html += menuCard('⛽', 'Yeni İşlem', 'Fiş fotoğrafı zorunlu', 'showNewTransaction()');
     }
   }
+  html += menuCard(
+    '🔧',
+    'İş Emirleri',
+    openOrders > 0 ? `${openOrders} açık görev` : 'Görevler · fotoğrafla tamamla',
+    'showWorkOrders()',
+    openOrders > 0
+  );
   html += menuCard('🧾', 'İşlem Listesi', 'Tüm satış ve ödeme kayıtları', 'showTransactions()');
   html += menuCard('⏱', 'Vardiya Raporları', 'Pompacı vardiya geçmişi', 'showShifts()');
   html += menuCard('💬', 'Sohbet', 'Ekip içi mesajlaşma', 'showChat()');
@@ -1507,9 +1517,10 @@ async function showDashboard() {
     pageHeader('Yönetici Paneli', 'showHome()') + '<div id="dashContent"><p class="empty">Yükleniyor...</p></div>';
 
   try {
-    const [d, docsMeta] = await Promise.all([
+    const [d, docsMeta, woMeta] = await Promise.all([
       api('GET', '/admin/dashboard'),
       api('GET', '/documents').catch(() => ({ summary: { expired: 0, expiring: 0 } })),
+      api('GET', '/work-orders?status=OPEN').catch(() => ({ summary: { openCount: 0 } })),
     ]);
     const expired = docsMeta.summary?.expired || 0;
     const expiring = docsMeta.summary?.expiring || 0;
@@ -1517,6 +1528,7 @@ async function showDashboard() {
     const docHint = warnN > 0
       ? `${warnN} belge süre uyarısı`
       : 'Ruhsat, sigorta ve diğer belgeler';
+    const openOrders = woMeta.summary?.openCount || 0;
 
     document.getElementById('dashContent').innerHTML = `
       <div class="stats-grid">
@@ -1527,6 +1539,7 @@ async function showDashboard() {
       </div>
       <p class="section-label">Yönetim</p>
       <div class="menu-grid">
+        ${menuCard('🔧','İş Emirleri', openOrders > 0 ? `${openOrders} açık görev` : 'Görev oluştur / takip et','showWorkOrders()', openOrders > 0)}
         ${menuCard('📁','Evrak Merkezi', docHint,'showDocumentsAdmin()', warnN > 0)}
         ${menuCard('📢','Duyurular','Kurallar ve duyuru yayınla','showAnnouncementsAdmin()')}
         ${menuCard('👤','Üyeler','Pompacı / muhasebeci ekle','showUsers()')}
@@ -1550,6 +1563,253 @@ async function showDashboard() {
     document.getElementById('dashContent').innerHTML = `<p class="empty">${e.message}</p>`;
   }
 }
+
+// ===== İŞ EMİRLERİ =====
+const WO_STATUS_LABELS = {
+  OPEN: 'Açık',
+  DONE: 'Tamamlandı',
+  CANCELLED: 'İptal',
+};
+
+let workOrdersCache = [];
+let workOrdersFilter = 'OPEN';
+
+async function showWorkOrders() {
+  stopChatPoll();
+  setHeaderTitle('İş Emirleri');
+  workOrdersFilter = 'OPEN';
+  const back = isAdmin() ? 'showDashboard()' : 'showHome()';
+  document.getElementById('mainContent').innerHTML =
+    pageHeader('İş Emirleri', back) + `
+    <div class="day-close-toolbar">
+      <p class="credit-hint" style="margin:0;flex:1">
+        Yönetici görev yazar; personel <strong>fotoğrafla</strong> tamamlar. Fotoğrafsız tamamlanamaz.
+      </p>
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="openWorkOrderCreateModal()">+ İş Emri</button>' : ''}
+    </div>
+    <div class="doc-filters" id="woFilters">
+      <button type="button" class="doc-chip active" onclick="setWorkOrderFilter('OPEN')">Açık</button>
+      <button type="button" class="doc-chip" onclick="setWorkOrderFilter('DONE')">Tamamlanan</button>
+      <button type="button" class="doc-chip" onclick="setWorkOrderFilter('ALL')">Tümü</button>
+    </div>
+    <div id="woList"><p class="empty">Yükleniyor...</p></div>`;
+  await loadWorkOrders();
+}
+
+function setWorkOrderFilter(status) {
+  workOrdersFilter = status;
+  document.querySelectorAll('#woFilters .doc-chip').forEach((el) => {
+    el.classList.toggle('active', el.textContent.trim().startsWith(
+      status === 'OPEN' ? 'Açık' : status === 'DONE' ? 'Tamamlanan' : 'Tümü'
+    ));
+  });
+  void loadWorkOrders();
+}
+
+async function loadWorkOrders() {
+  const list = document.getElementById('woList');
+  if (!list) return;
+  try {
+    const q = workOrdersFilter === 'ALL' ? '' : `?status=${workOrdersFilter}`;
+    const data = await api('GET', `/work-orders${q}`);
+    workOrdersCache = data.workOrders || [];
+    if (!workOrdersCache.length) {
+      list.innerHTML = '<p class="empty">Bu listede iş emri yok</p>';
+      return;
+    }
+    list.innerHTML = workOrdersCache.map((w) => {
+      const st = w.status || 'OPEN';
+      const stCls = st === 'OPEN' ? 'open' : st === 'DONE' ? 'done' : 'cancelled';
+      return `
+      <div class="wo-item ${stCls}">
+        <div class="wo-item-main">
+          <div class="wo-item-top">
+            <span class="wo-status ${stCls}">${WO_STATUS_LABELS[st] || st}</span>
+            <span class="wo-date">${fmtDate(w.createdAt)}</span>
+          </div>
+          <div class="wo-title">${escHtml(w.title)}</div>
+          ${w.note ? `<div class="wo-note">${escHtml(w.note)}</div>` : ''}
+          <div class="wo-meta">
+            Oluşturan: ${escHtml(w.createdBy?.name || '?')}
+            ${w.completedBy ? ` · Yapan: ${escHtml(w.completedBy.name)}` : ''}
+            ${w.completedAt ? ` · ${fmtDate(w.completedAt)}` : ''}
+          </div>
+        </div>
+        <div class="wo-actions">
+          ${st === 'OPEN' ? `<button class="btn btn-sm btn-primary" onclick="openWorkOrderCompleteModal('${w.id}')">Tamamla</button>` : ''}
+          ${st === 'DONE' && w.hasPhoto ? `<button class="btn btn-sm btn-secondary" onclick="viewWorkOrderPhoto('${w.id}')">Fotoğraf</button>` : ''}
+          ${isAdmin() && st === 'OPEN' ? `<button class="btn btn-sm btn-secondary" onclick="cancelWorkOrder('${w.id}')">İptal</button>` : ''}
+          ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteWorkOrder('${w.id}')">Sil</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<p class="empty">${e.message}</p>`;
+  }
+}
+
+function openWorkOrderCreateModal() {
+  if (!isAdmin()) return toast('Yalnızca yönetici oluşturabilir');
+  openModal('Yeni İş Emri', `
+    <form id="woCreateForm">
+      <div id="woFormError" class="error-msg hidden"></div>
+      <div class="form-group">
+        <label for="woTitle">Görev *</label>
+        <textarea id="woTitle" rows="3" placeholder="Örn: Pompa 5 filtre değişecek." required></textarea>
+      </div>
+      <div class="form-group">
+        <label for="woNote">Not (opsiyonel)</label>
+        <input type="text" id="woNote" placeholder="Ek bilgi">
+      </div>
+      <div class="modal-footer" style="padding:8px 0 0">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">İptal</button>
+        <button type="submit" class="btn btn-primary">Oluştur</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('woCreateForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('woFormError');
+    try {
+      const title = document.getElementById('woTitle')?.value?.trim() || '';
+      const note = document.getElementById('woNote')?.value?.trim() || '';
+      if (!title) throw new Error('Görev metni zorunlu');
+      await api('POST', '/work-orders', { title, note });
+      toast('İş emri oluşturuldu');
+      closeModal();
+      await loadWorkOrders();
+    } catch (err) {
+      if (errEl) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+      }
+      toast(err.message);
+    }
+  });
+}
+
+function openWorkOrderCompleteModal(id) {
+  const w = workOrdersCache.find((x) => x.id === id);
+  if (!w) return toast('İş emri bulunamadı');
+  openModal('Görevi Tamamla', `
+    <form id="woCompleteForm">
+      <div id="woFormError" class="error-msg hidden"></div>
+      <p class="wo-complete-title">${escHtml(w.title)}</p>
+      <p class="credit-hint">Tamamlama için kanıt fotoğrafı zorunludur. Fotoğrafsız kayıt kabul edilmez.</p>
+      <div class="form-group">
+        <label>Fotoğraf *</label>
+        <div class="receipt-upload" id="woPhotoBox" onclick="document.getElementById('woPhotoInput').click()">
+          <div class="icon">📷</div>
+          <p>Fotoğraf çekin veya seçin</p>
+          <input type="file" id="woPhotoInput" accept="image/*,.heic,.heif" capture="environment"
+            onchange="previewWorkOrderPhoto(this)">
+        </div>
+        <img id="woPhotoPreview" class="receipt-preview hidden" alt="Kanıt">
+      </div>
+      <div class="modal-footer" style="padding:8px 0 0">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Vazgeç</button>
+        <button type="submit" class="btn btn-primary" id="woCompleteBtn">Tamamlandı</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('woCompleteForm')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void completeWorkOrder(id);
+  });
+}
+
+function previewWorkOrderPhoto(input) {
+  const file = input.files?.[0];
+  const prev = document.getElementById('woPhotoPreview');
+  if (!file || !prev) return;
+  prev.src = URL.createObjectURL(file);
+  prev.classList.remove('hidden');
+}
+
+async function completeWorkOrder(id) {
+  const errEl = document.getElementById('woFormError');
+  const btn = document.getElementById('woCompleteBtn');
+  try {
+    const file = document.getElementById('woPhotoInput')?.files?.[0];
+    if (!file) throw new Error('Fotoğraf zorunlu — fotoğrafsız görev tamamlanamaz');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Gönderiliyor...';
+    }
+    const compressed = await compressImageForUpload(file);
+    const fd = new FormData();
+    fd.append('photo', compressed);
+    await api('POST', `/work-orders/${id}/complete`, fd, true, 90000);
+    toast('İş emri tamamlandı');
+    closeModal();
+    await loadWorkOrders();
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = e.message || 'Tamamlanamadı';
+      errEl.classList.remove('hidden');
+    }
+    toast(e.message || 'Tamamlanamadı');
+  } finally {
+    const b = document.getElementById('woCompleteBtn');
+    if (b) {
+      b.disabled = false;
+      b.textContent = 'Tamamlandı';
+    }
+  }
+}
+
+async function viewWorkOrderPhoto(id) {
+  try {
+    const res = await fetch(`${API}/work-orders/${id}/photo`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Fotoğraf açılamadı');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    openModal('Tamamlama Fotoğrafı', `
+      <img class="receipt-full receipt-zoom" src="${url}" alt="Kanıt"
+        onclick="window.open('${url}','_blank')">
+      <p class="credit-hint" style="text-align:center;margin-top:8px">Büyütmek için tıklayın</p>
+    `);
+    document.getElementById('modalBox')?.classList.add('modal-wide');
+  } catch (e) {
+    toast(e.message || 'Fotoğraf açılamadı');
+  }
+}
+
+async function cancelWorkOrder(id) {
+  if (!confirm('Bu iş emri iptal edilsin mi?')) return;
+  try {
+    await api('POST', `/work-orders/${id}/cancel`, {});
+    toast('İptal edildi');
+    await loadWorkOrders();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function deleteWorkOrder(id) {
+  if (!confirm('İş emri silinsin mi?')) return;
+  try {
+    await api('DELETE', `/work-orders/${id}`);
+    toast('Silindi');
+    await loadWorkOrders();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+window.showWorkOrders = showWorkOrders;
+window.setWorkOrderFilter = setWorkOrderFilter;
+window.openWorkOrderCreateModal = openWorkOrderCreateModal;
+window.openWorkOrderCompleteModal = openWorkOrderCompleteModal;
+window.previewWorkOrderPhoto = previewWorkOrderPhoto;
+window.viewWorkOrderPhoto = viewWorkOrderPhoto;
+window.cancelWorkOrder = cancelWorkOrder;
+window.deleteWorkOrder = deleteWorkOrder;
 
 // ===== EVRAK MERKEZİ (ADMIN) =====
 const DOC_CATEGORY_LABELS = {
