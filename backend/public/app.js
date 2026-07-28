@@ -1670,42 +1670,42 @@ function openUserModalById(id) {
 function openUserModal(user = null) {
   const isEdit = Boolean(user);
   const editId = isEdit ? String(user.id) : '';
-  const nick = user?.username || (user?.email ? user.email.split('@')[0] : '');
+  const nick = user?.username || (user?.email ? String(user.email).split('@')[0] : '');
   openModal(isEdit ? 'Üye Düzenle' : 'Yeni Üye', `
     <form id="userForm" autocomplete="off">
       <div id="userFormError" class="error-msg hidden"></div>
       <div class="form-group">
-        <label for="userName">Ad Soyad *</label>
-        <input type="text" id="userName" name="name" value="${escHtml(user?.name || '')}" placeholder="Örn: Ali Yılmaz" required>
+        <label for="userFullName">Ad Soyad *</label>
+        <input type="text" id="userFullName" name="fullName" value="${escHtml(user?.name || '')}" placeholder="Örn: Ali Yılmaz" required>
       </div>
       <div class="form-group">
-        <label for="userUsername">Kullanıcı adı (nick) *</label>
-        <input type="text" id="userUsername" name="username" value="${escHtml(nick)}" placeholder="örn: ali"
+        <label for="userNick">Kullanıcı adı (nick) *</label>
+        <input type="text" id="userNick" name="nick" value="${escHtml(nick)}" placeholder="örn: ali"
           autocapitalize="none" spellcheck="false" required>
         <p class="credit-hint">Giriş bu nick ile yapılır. Sadece harf/rakam (örn: ali, pompaci1).</p>
       </div>
       <div class="form-group">
-        <label for="userRole">Rol *</label>
-        <select id="userRole" name="role">
+        <label for="userRoleSelect">Rol *</label>
+        <select id="userRoleSelect" name="role">
           <option value="STAFF" ${!user || user.role === 'STAFF' ? 'selected' : ''}>Pompacı</option>
           <option value="ACCOUNTANT" ${user?.role === 'ACCOUNTANT' ? 'selected' : ''}>Muhasebeci</option>
           <option value="ADMIN" ${user?.role === 'ADMIN' ? 'selected' : ''}>Yönetici</option>
         </select>
       </div>
       <div class="form-group">
-        <label for="userPassword">${isEdit ? 'Yeni şifre (boş bırakırsanız değişmez)' : 'Şifre *'}</label>
-        <input type="password" id="userPassword" name="password" placeholder="${isEdit ? '••••••••' : 'En az 6 karakter'}" autocomplete="new-password" ${isEdit ? '' : 'required minlength="6"'}>
+        <label for="userPass">${isEdit ? 'Yeni şifre (boş bırakırsanız değişmez)' : 'Şifre *'}</label>
+        <input type="password" id="userPass" name="pass" placeholder="${isEdit ? '••••••••' : 'En az 6 karakter'}" autocomplete="new-password" ${isEdit ? '' : 'required minlength="6"'}>
       </div>
       ${isEdit ? `
       <div class="form-group">
-        <label for="userActive">Durum</label>
-        <select id="userActive" name="isActive" ${user.id === currentUser.id ? 'disabled' : ''}>
+        <label for="userActiveSelect">Durum</label>
+        <select id="userActiveSelect" name="isActive" ${user.id === currentUser.id ? 'disabled' : ''}>
           <option value="true" ${user.isActive ? 'selected' : ''}>Aktif</option>
           <option value="false" ${!user.isActive ? 'selected' : ''}>Pasif</option>
         </select>
         ${user.id === currentUser.id ? '<p class="credit-hint">Kendi hesabınızı pasifleştiremezsiniz.</p>' : ''}
       </div>` : ''}
-      <div class="modal-footer" style="padding:8px 0 0;margin:0 -0">
+      <div class="modal-footer" style="padding:8px 0 0">
         <button type="button" class="btn btn-secondary" id="userCancelBtn">İptal</button>
         <button type="submit" class="btn btn-primary" id="userSaveBtn">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
       </div>
@@ -1716,12 +1716,11 @@ function openUserModal(user = null) {
   const cancelBtn = document.getElementById('userCancelBtn');
   if (cancelBtn) cancelBtn.onclick = () => closeModal();
   if (form) {
-    form.onsubmit = (e) => {
+    form.addEventListener('submit', (e) => {
       e.preventDefault();
       e.stopPropagation();
       void saveUser(editId || null);
-      return false;
-    };
+    });
   }
 }
 
@@ -1737,7 +1736,7 @@ function showUserFormError(msg) {
 }
 
 function normalizeNickClient(raw) {
-  return String(raw || '')
+  return String(raw ?? '')
     .trim()
     .toLocaleLowerCase('tr-TR')
     .replace(/ğ/g, 'g')
@@ -1750,7 +1749,21 @@ function normalizeNickClient(raw) {
     .replace(/[^a-z0-9._-]/g, '');
 }
 
+function fieldText(form, key) {
+  if (!form) return '';
+  try {
+    const fd = new FormData(form);
+    const v = fd.get(key);
+    return String(v ?? '').trim();
+  } catch (_) {
+    const el = form.elements?.[key];
+    return String(el?.value ?? '').trim();
+  }
+}
+
 async function saveUser(id) {
+  const form = document.getElementById('userForm');
+  const btn = document.getElementById('userSaveBtn');
   try {
     const errEl = document.getElementById('userFormError');
     if (errEl) {
@@ -1758,23 +1771,19 @@ async function saveUser(id) {
       errEl.textContent = '';
     }
 
-    const nameEl = document.getElementById('userName');
-    const nickEl = document.getElementById('userUsername');
-    const roleEl = document.getElementById('userRole');
-    const passEl = document.getElementById('userPassword');
-    const btn = document.getElementById('userSaveBtn');
-
-    if (!nameEl || !nickEl || !roleEl || !passEl) {
-      toast('Form yüklenemedi — sayfayı yenileyip tekrar deneyin (Cmd+Shift+R)');
+    if (!form) {
+      toast('Form yüklenemedi — sayfayı yenileyin (Cmd+Shift+R)');
       return;
     }
 
-    const name = nameEl.value.trim();
-    const username = normalizeNickClient(nickEl.value);
-    nickEl.value = username;
-    const role = roleEl.value;
-    const password = passEl.value;
+    const name = fieldText(form, 'fullName');
+    const username = normalizeNickClient(fieldText(form, 'nick'));
+    const role = fieldText(form, 'role') || 'STAFF';
+    const password = fieldText(form, 'pass');
     const isEdit = Boolean(id);
+
+    const nickInput = document.getElementById('userNick');
+    if (nickInput) nickInput.value = username;
 
     if (!name) return showUserFormError('Ad soyad zorunlu');
     if (!username) return showUserFormError('Kullanıcı adı (nick) zorunlu');
@@ -1782,7 +1791,7 @@ async function saveUser(id) {
     if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
       return showUserFormError('Nick sadece harf, rakam, nokta, alt çizgi veya tire olabilir');
     }
-    if (!isEdit && (!password || password.length < 6)) {
+    if (!isEdit && password.length < 6) {
       return showUserFormError('Şifre en az 6 karakter olmalı');
     }
     if (isEdit && password && password.length < 6) {
@@ -1796,7 +1805,7 @@ async function saveUser(id) {
 
     if (isEdit) {
       const body = { name, username, role };
-      const activeEl = document.getElementById('userActive');
+      const activeEl = document.getElementById('userActiveSelect');
       if (activeEl && !activeEl.disabled) body.isActive = activeEl.value === 'true';
       if (password) body.password = password;
       await api('PATCH', `/admin/users/${id}`, body);
@@ -1812,10 +1821,10 @@ async function saveUser(id) {
     showUserFormError(e.message || 'Kayıt başarısız');
     toast(e.message || 'Kayıt başarısız');
   } finally {
-    const btn = document.getElementById('userSaveBtn');
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = id ? 'Güncelle' : 'Kaydet';
+    const b = document.getElementById('userSaveBtn');
+    if (b) {
+      b.disabled = false;
+      b.textContent = id ? 'Güncelle' : 'Kaydet';
     }
   }
 }

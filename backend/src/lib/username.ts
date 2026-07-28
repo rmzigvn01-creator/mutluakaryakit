@@ -1,6 +1,6 @@
 /** Normalize login nick: lowercase, trim, Turkish → ASCII */
-export function normalizeUsername(raw: string): string {
-  return raw
+export function normalizeUsername(raw: string | null | undefined): string {
+  return String(raw ?? "")
     .trim()
     .toLocaleLowerCase("tr-TR")
     .replace(/ğ/g, "g")
