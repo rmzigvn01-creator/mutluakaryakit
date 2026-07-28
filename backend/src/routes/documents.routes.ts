@@ -25,10 +25,25 @@ if (!fs.existsSync(config.uploadDir)) {
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, config.uploadDir),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || "";
+    let ext = path.extname(file.originalname || "").toLowerCase();
+    if (!ext) {
+      const m = (file.mimetype || "").toLowerCase();
+      if (m === "application/pdf") ext = ".pdf";
+      else if (m === "image/png") ext = ".png";
+      else if (m === "image/webp") ext = ".webp";
+      else if (m === "image/gif") ext = ".gif";
+      else if (m.includes("jpeg")) ext = ".jpg";
+      else if (m.includes("heic") || m.includes("heif")) ext = ".heic";
+      else ext = ".bin";
+    }
     cb(null, `doc-${uuidv4()}${ext}`);
   },
 });
+
+/** Büyük BYTEA insert pooler’da takılabiliyor; evraklar kalıcı diskte tutulur */
+function readFileForDb(_filePath: string): Buffer | null {
+  return null;
+}
 
 function isAllowedDocumentUpload(originalName: string, mime: string): boolean {
   const lower = (originalName || "").toLowerCase();
@@ -179,137 +194,157 @@ router.get("/", async (req: AuthRequest, res) => {
 });
 
 router.post("/", uploadDocument, async (req: AuthRequest, res) => {
-  const title = String(req.body?.title || "").trim();
-  const category = String(req.body?.category || "").trim();
-  const note = String(req.body?.note || "").trim() || null;
-  const expiresParsed = parseExpiresAt(req.body?.expiresAt);
+  try {
+    const title = String(req.body?.title || "").trim();
+    const category = String(req.body?.category || "").trim();
+    const note = String(req.body?.note || "").trim() || null;
+    const expiresParsed = parseExpiresAt(req.body?.expiresAt);
 
-  if (!title) {
-    res.status(400).json({ error: "Başlık gerekli" });
-    return;
-  }
-  if (title.length > 160) {
-    res.status(400).json({ error: "Başlık en fazla 160 karakter olabilir" });
-    return;
-  }
-  if (!CATEGORIES.has(category)) {
-    res.status(400).json({ error: "Geçersiz kategori" });
-    return;
-  }
-  if (expiresParsed === undefined && req.body?.expiresAt) {
-    res.status(400).json({ error: "Bitiş tarihi geçersiz" });
-    return;
-  }
-  if (!req.file) {
-    res.status(400).json({ error: "Dosya gerekli (PDF veya görüntü)" });
-    return;
-  }
-
-  const resolvedPath = path.resolve(req.file.path);
-  const fileBytes = fs.readFileSync(resolvedPath);
-  const fileMime = mimeFromPath(resolvedPath, req.file.mimetype);
-
-  const doc = await prisma.stationDocument.create({
-    data: {
-      stationId: req.user!.stationId,
-      category: category as DocumentCategory,
-      title,
-      note,
-      expiresAt: expiresParsed === undefined ? null : expiresParsed,
-      fileName: req.file.originalname || path.basename(resolvedPath),
-      filePath: resolvedPath,
-      fileData: fileBytes as never,
-      fileMime,
-      createdById: req.user!.userId,
-    },
-    select: selectPublic,
-  });
-
-  await logAudit(req.user!.userId, "DOCUMENT_CREATE", "StationDocument", doc.id, {
-    title: doc.title,
-    category: doc.category,
-  });
-
-  res.status(201).json({ document: publicDocument(doc) });
-});
-
-router.patch("/:id", uploadDocument, async (req: AuthRequest, res) => {
-  const id = routeId(req.params.id);
-  const existing = await prisma.stationDocument.findFirst({
-    where: { id, stationId: req.user!.stationId },
-  });
-  if (!existing) {
-    res.status(404).json({ error: "Evrak bulunamadı" });
-    return;
-  }
-
-  const data: {
-    title?: string;
-    category?: DocumentCategory;
-    note?: string | null;
-    expiresAt?: Date | null;
-    fileName?: string;
-    filePath?: string;
-    fileData?: Buffer;
-    fileMime?: string;
-  } = {};
-
-  if (req.body?.title !== undefined) {
-    const title = String(req.body.title).trim();
     if (!title) {
-      res.status(400).json({ error: "Başlık boş olamaz" });
+      res.status(400).json({ error: "Başlık gerekli" });
       return;
     }
     if (title.length > 160) {
       res.status(400).json({ error: "Başlık en fazla 160 karakter olabilir" });
       return;
     }
-    data.title = title;
-  }
-
-  if (req.body?.category !== undefined) {
-    const category = String(req.body.category).trim();
     if (!CATEGORIES.has(category)) {
       res.status(400).json({ error: "Geçersiz kategori" });
       return;
     }
-    data.category = category as DocumentCategory;
-  }
-
-  if (req.body?.note !== undefined) {
-    data.note = String(req.body.note).trim() || null;
-  }
-
-  if (req.body?.expiresAt !== undefined) {
-    const expiresParsed = parseExpiresAt(req.body.expiresAt);
-    if (expiresParsed === undefined) {
+    if (expiresParsed === undefined && req.body?.expiresAt) {
       res.status(400).json({ error: "Bitiş tarihi geçersiz" });
       return;
     }
-    data.expiresAt = expiresParsed;
-  }
+    if (!req.file) {
+      res.status(400).json({ error: "Dosya gerekli (PDF veya görüntü)" });
+      return;
+    }
 
-  if (req.file) {
     const resolvedPath = path.resolve(req.file.path);
-    const fileBytes = fs.readFileSync(resolvedPath);
-    data.fileName = req.file.originalname || path.basename(resolvedPath);
-    data.filePath = resolvedPath;
-    data.fileData = fileBytes;
-    data.fileMime = mimeFromPath(resolvedPath, req.file.mimetype);
+    if (!fs.existsSync(resolvedPath)) {
+      res.status(500).json({ error: "Dosya diske yazılamadı — tekrar deneyin" });
+      return;
+    }
+    const fileMime = mimeFromPath(resolvedPath, req.file.mimetype);
+    const fileBytes = readFileForDb(resolvedPath);
+
+    const doc = await prisma.stationDocument.create({
+      data: {
+        stationId: req.user!.stationId,
+        category: category as DocumentCategory,
+        title,
+        note,
+        expiresAt: expiresParsed === undefined ? null : expiresParsed,
+        fileName: req.file.originalname || path.basename(resolvedPath),
+        filePath: resolvedPath,
+        fileData: fileBytes ? (fileBytes as never) : undefined,
+        fileMime,
+        createdById: req.user!.userId,
+      },
+      select: selectPublic,
+    });
+
+    await logAudit(req.user!.userId, "DOCUMENT_CREATE", "StationDocument", doc.id, {
+      title: doc.title,
+      category: doc.category,
+    });
+
+    res.status(201).json({ document: publicDocument(doc) });
+  } catch (err) {
+    console.error("document create failed", err);
+    res.status(500).json({
+      error: err instanceof Error ? err.message : "Evrak kaydedilemedi",
+    });
   }
+});
 
-  const doc = await prisma.stationDocument.update({
-    where: { id },
-    // Prisma Bytes typing (Buffer vs Uint8Array) — runtime OK
-    data: data as never,
-    select: selectPublic,
-  });
+router.patch("/:id", uploadDocument, async (req: AuthRequest, res) => {
+  try {
+    const id = routeId(req.params.id);
+    const existing = await prisma.stationDocument.findFirst({
+      where: { id, stationId: req.user!.stationId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Evrak bulunamadı" });
+      return;
+    }
 
-  await logAudit(req.user!.userId, "DOCUMENT_UPDATE", "StationDocument", doc.id, {
-    title: doc.title,
-  });
+    const data: {
+      title?: string;
+      category?: DocumentCategory;
+      note?: string | null;
+      expiresAt?: Date | null;
+      fileName?: string;
+      filePath?: string;
+      fileData?: Buffer | null;
+      fileMime?: string;
+    } = {};
 
-  res.json({ document: publicDocument(doc) });
+    if (req.body?.title !== undefined) {
+      const title = String(req.body.title).trim();
+      if (!title) {
+        res.status(400).json({ error: "Başlık boş olamaz" });
+        return;
+      }
+      if (title.length > 160) {
+        res.status(400).json({ error: "Başlık en fazla 160 karakter olabilir" });
+        return;
+      }
+      data.title = title;
+    }
+
+    if (req.body?.category !== undefined) {
+      const category = String(req.body.category).trim();
+      if (!CATEGORIES.has(category)) {
+        res.status(400).json({ error: "Geçersiz kategori" });
+        return;
+      }
+      data.category = category as DocumentCategory;
+    }
+
+    if (req.body?.note !== undefined) {
+      data.note = String(req.body.note).trim() || null;
+    }
+
+    if (req.body?.expiresAt !== undefined) {
+      const expiresParsed = parseExpiresAt(req.body.expiresAt);
+      if (expiresParsed === undefined) {
+        res.status(400).json({ error: "Bitiş tarihi geçersiz" });
+        return;
+      }
+      data.expiresAt = expiresParsed;
+    }
+
+    if (req.file) {
+      const resolvedPath = path.resolve(req.file.path);
+      if (!fs.existsSync(resolvedPath)) {
+        res.status(500).json({ error: "Dosya diske yazılamadı — tekrar deneyin" });
+        return;
+      }
+      data.fileName = req.file.originalname || path.basename(resolvedPath);
+      data.filePath = resolvedPath;
+      data.fileMime = mimeFromPath(resolvedPath, req.file.mimetype);
+      data.fileData = readFileForDb(resolvedPath);
+    }
+
+    const doc = await prisma.stationDocument.update({
+      where: { id },
+      data: data as never,
+      select: selectPublic,
+    });
+
+    await logAudit(req.user!.userId, "DOCUMENT_UPDATE", "StationDocument", doc.id, {
+      title: doc.title,
+    });
+
+    res.json({ document: publicDocument(doc) });
+  } catch (err) {
+    console.error("document update failed", err);
+    res.status(500).json({
+      error: err instanceof Error ? err.message : "Evrak güncellenemedi",
+    });
+  }
 });
 
 router.delete("/:id", async (req: AuthRequest, res) => {
@@ -359,14 +394,7 @@ router.get("/:id/file", async (req: AuthRequest, res) => {
   const disposition = req.query.download === "1" ? "attachment" : "inline";
   const safeName = (doc.fileName || "evrak").replace(/"/g, "");
 
-  if (doc.fileData && doc.fileData.length > 0) {
-    res.setHeader("Content-Type", doc.fileMime || "application/octet-stream");
-    res.setHeader("Content-Disposition", `${disposition}; filename="${safeName}"`);
-    res.setHeader("Cache-Control", "private, max-age=3600");
-    res.send(Buffer.from(doc.fileData));
-    return;
-  }
-
+  // Kalıcı disk önce (büyük dosyalar DB’ye yazılmıyor)
   if (doc.filePath) {
     const p = resolveStoredPath(doc.filePath);
     if (fs.existsSync(p)) {
@@ -376,6 +404,14 @@ router.get("/:id/file", async (req: AuthRequest, res) => {
       res.sendFile(p);
       return;
     }
+  }
+
+  if (doc.fileData && doc.fileData.length > 0) {
+    res.setHeader("Content-Type", doc.fileMime || "application/octet-stream");
+    res.setHeader("Content-Disposition", `${disposition}; filename="${safeName}"`);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(Buffer.from(doc.fileData));
+    return;
   }
 
   res.status(404).json({ error: "Dosya bulunamadı" });

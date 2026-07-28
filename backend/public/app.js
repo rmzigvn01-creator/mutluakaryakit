@@ -3,19 +3,57 @@ const API = '/api';
 let token = localStorage.getItem('token');
 let currentUser = null;
 
-async function api(method, path, body, isForm = false) {
+async function api(method, path, body, isForm = false, timeoutMs = 0) {
   const headers = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (!isForm) headers['Content-Type'] = 'application/json';
 
-  const opts = { method, headers };
-  if (body && !isForm) opts.body = JSON.stringify(body);
-  if (body && isForm) opts.body = body;
+  const ctrl = timeoutMs > 0 ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    const opts = { method, headers, signal: ctrl?.signal };
+    if (body && !isForm) opts.body = JSON.stringify(body);
+    if (body && isForm) opts.body = body;
 
-  const res = await fetch(API + path, opts);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Bir hata oluştu');
-  return data;
+    const res = await fetch(API + path, opts);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Bir hata oluştu');
+    return data;
+  } catch (e) {
+    if (e?.name === 'AbortError') {
+      throw new Error('İstek zaman aşımına uğradı — daha küçük dosya deneyin');
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Büyük görselleri JPEG’e küçült (evrak yükleme) */
+async function compressImageForUpload(file, maxEdge = 1800, quality = 0.82) {
+  if (!file || !file.type?.startsWith('image/') || file.type.includes('heic') || file.type.includes('heif')) {
+    return file;
+  }
+  if (file.size < 900 * 1024) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!blob || blob.size >= file.size) return file;
+    const name = (file.name || 'evrak').replace(/\.\w+$/, '') + '.jpg';
+    return new File([blob], name, { type: 'image/jpeg' });
+  } catch (_) {
+    return file;
+  }
 }
 
 // ===== OFFLINE QUEUE =====
@@ -1710,11 +1748,20 @@ async function saveDocument(id) {
     const expiresAt = document.getElementById('docExpires')?.value || '';
     const note = document.getElementById('docNote')?.value?.trim() || '';
     const fileInput = document.getElementById('docFile');
-    const file = fileInput?.files?.[0];
+    let file = fileInput?.files?.[0];
 
     if (!title) throw new Error('Başlık zorunlu');
     if (!category) throw new Error('Kategori seçin');
     if (!id && !file) throw new Error('Dosya gerekli');
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Kaydediliyor...';
+    }
+
+    if (file) {
+      file = await compressImageForUpload(file);
+    }
 
     const fd = new FormData();
     fd.append('title', title);
@@ -1723,16 +1770,11 @@ async function saveDocument(id) {
     fd.append('expiresAt', expiresAt);
     if (file) fd.append('file', file);
 
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Kaydediliyor...';
-    }
-
     if (id) {
-      await api('PATCH', `/documents/${id}`, fd, true);
+      await api('PATCH', `/documents/${id}`, fd, true, 90000);
       toast('Evrak güncellendi');
     } else {
-      await api('POST', '/documents', fd, true);
+      await api('POST', '/documents', fd, true, 90000);
       toast('Evrak eklendi');
     }
     closeModal();
@@ -1744,9 +1786,10 @@ async function saveDocument(id) {
     }
     toast(e.message || 'Kayıt başarısız');
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = id ? 'Güncelle' : 'Kaydet';
+    const b = document.getElementById('docSaveBtn');
+    if (b) {
+      b.disabled = false;
+      b.textContent = id ? 'Güncelle' : 'Kaydet';
     }
   }
 }
