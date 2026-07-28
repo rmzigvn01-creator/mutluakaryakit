@@ -10,7 +10,7 @@
   <title>Mutlu Akaryakıt | Petrol Ofisi Bayi</title>
   <link rel="icon" type="image/png" href="/favicon-po.png">
   <link rel="apple-touch-icon" href="/logo-po-mark-red.png">
-  <link rel="stylesheet" href="/style.css?v=44">
+  <link rel="stylesheet" href="/style.css?v=45">
 </head>
 <body>
 
@@ -38,6 +38,10 @@
       <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
     </div>
     <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Giriş Yap</button>
+    <button class="btn btn-secondary login-qr-btn" type="button" onclick="startLoginShiftQrScan()">
+      QR ile vardiya başlat
+    </button>
+    <p class="login-qr-hint">Önce kullanıcı adı ve şifreyi girin, sonra işyeri ekranındaki güncel QR’ı okutun.</p>
   </div>
 
   <p class="login-footer">Petrol Ofisi Bayi · Mutlu Akaryakıt © 2026</p>
@@ -71,6 +75,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
-<script src="/app.js?v=44"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="/app.js?v=45"></script>
 </body>
 </html>

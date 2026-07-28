@@ -9,6 +9,7 @@ import {
   sanitizeShiftSummaryForRole,
 } from "../lib/roles.js";
 import { routeId } from "../lib/route-id.js";
+import { createShiftQrToken, verifyShiftQrToken } from "../lib/shift-qr.js";
 
 const router = Router();
 
@@ -76,8 +77,36 @@ router.get("/current", async (req: AuthRequest, res) => {
   });
 });
 
-// Vardiya başlat
+/**
+ * İşyeri bilgisayarı için dönen QR token (30 sn’de bir değişir).
+ * Yalnızca yönetici — istasyon PC’sinde açık tutulur.
+ */
+router.get("/qr", requireRoles(UserRole.ADMIN), async (req: AuthRequest, res) => {
+  const issued = createShiftQrToken(req.user!.stationId);
+  res.json({
+    token: issued.token,
+    expiresAt: new Date(issued.expiresAt).toISOString(),
+    expiresInMs: issued.expiresInMs,
+    windowMs: 30_000,
+    /** Telefonda okutulacak ham içerik */
+    payload: issued.token,
+  });
+});
+
+// Vardiya başlat — personel için güncel QR zorunlu
 router.post("/start", requireRoles(UserRole.STAFF, UserRole.ADMIN), async (req: AuthRequest, res) => {
+  const { qrToken } = req.body as { qrToken?: string };
+
+  if (req.user!.role === UserRole.STAFF) {
+    if (!qrToken || !verifyShiftQrToken(qrToken, req.user!.stationId)) {
+      res.status(400).json({
+        error:
+          "Geçersiz veya süresi dolmuş QR. İşyeri ekranındaki güncel kodu okutun (30 sn).",
+      });
+      return;
+    }
+  }
+
   const existing = await prisma.shift.findFirst({
     where: {
       userId: req.user!.userId,
@@ -100,7 +129,9 @@ router.post("/start", requireRoles(UserRole.STAFF, UserRole.ADMIN), async (req: 
     include: { user: { select: { id: true, name: true } } },
   });
 
-  await logAudit(req.user!.userId, "SHIFT_START", "Shift", shift.id, {});
+  await logAudit(req.user!.userId, "SHIFT_START", "Shift", shift.id, {
+    viaQr: Boolean(qrToken),
+  });
 
   res.status(201).json({ shift });
 });

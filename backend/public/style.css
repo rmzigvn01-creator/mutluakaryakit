@@ -1762,3 +1762,58 @@ body {
   margin-bottom: 8px;
   line-height: 1.35;
 }
+
+/* ===== SHIFT QR ===== */
+.login-qr-btn {
+  width: 100%;
+  margin-top: 10px;
+}
+.login-qr-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--po-gray);
+  text-align: center;
+  line-height: 1.4;
+  font-weight: 500;
+}
+.shift-qr-kiosk {
+  text-align: center;
+  padding: 12px 8px 24px;
+}
+.shift-qr-kiosk-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+.shift-qr-canvas-wrap {
+  display: inline-block;
+  margin: 16px auto;
+  padding: 16px;
+  background: #fff;
+  border-radius: 16px;
+  border: 2px solid var(--po-border);
+  box-shadow: var(--shadow);
+}
+.shift-qr-timer {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--po-red);
+  margin-top: 8px;
+  letter-spacing: .04em;
+}
+.shift-qr-token {
+  font-size: 11px;
+  color: var(--po-gray);
+  word-break: break-all;
+  margin-top: 8px;
+}
+.shift-qr-reader {
+  width: 100%;
+  min-height: 260px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #111;
+}
+.shift-qr-reader video {
+  border-radius: 12px !important;
+}

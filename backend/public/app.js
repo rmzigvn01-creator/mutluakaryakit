@@ -293,6 +293,7 @@ function openModal(title, bodyHtml, footerHtml = '') {
 }
 
 function closeModal() {
+  stopShiftQrScanner();
   document.getElementById('modalOverlay').classList.add('hidden');
   document.getElementById('modalBox').innerHTML = '';
   document.getElementById('modalBox').classList.remove('modal-wide');
@@ -443,7 +444,8 @@ function renderShiftBanner(shiftData) {
         <p style="font-size:13px;color:var(--po-gray);margin-bottom:12px">
           İşlem girmeden önce vardiyanızı başlatın.
         </p>
-        <button class="btn btn-primary" onclick="startShift()">Vardiya Başlat</button>
+        <button class="btn btn-primary" onclick="startLoggedInShiftQrScan()">QR ile Vardiya Başlat</button>
+        ${isAdmin() ? '<button class="btn btn-secondary" onclick="startShiftAdminBypass()">Yönetici: QR’sız başlat</button>' : ''}
       </div>`;
   }
   if (!shift) return '';
@@ -468,12 +470,195 @@ function renderShiftBanner(shiftData) {
     </div>`;
 }
 
-async function startShift() {
+async function startShiftAdminBypass() {
+  if (!isAdmin()) return toast('Yalnızca yönetici');
   try {
     await api('POST', '/shifts/start', {});
     toast('Vardiya başlatıldı');
     showHome();
   } catch (e) { toast(e.message); }
+}
+
+async function startShiftWithQrToken(qrToken) {
+  await api('POST', '/shifts/start', { qrToken });
+  toast('Vardiya başlatıldı');
+  showHome();
+}
+
+let shiftQrPollTimer = null;
+let shiftQrScanner = null;
+
+function stopShiftQrPoll() {
+  if (shiftQrPollTimer) {
+    clearInterval(shiftQrPollTimer);
+    shiftQrPollTimer = null;
+  }
+}
+
+function stopShiftQrScanner() {
+  if (shiftQrScanner) {
+    try { shiftQrScanner.stop(); } catch (_) {}
+    try { shiftQrScanner.clear(); } catch (_) {}
+    shiftQrScanner = null;
+  }
+}
+
+/** İşyeri bilgisayarı: 30 sn’de bir yenilenen QR */
+async function showShiftQrDisplay() {
+  if (!isAdmin()) return toast('Bu ekran yalnızca yönetici içindir');
+  stopChatPoll();
+  stopShiftQrPoll();
+  setHeaderTitle('Vardiya QR');
+  document.getElementById('mainContent').innerHTML = `
+    ${pageHeader('Vardiya QR Ekranı', 'showDashboard()')}
+    <div class="shift-qr-kiosk">
+      <p class="shift-qr-kiosk-title">Vardiya başlatmak için bu kodu okutun</p>
+      <p class="credit-hint">Kod her 30 saniyede değişir. Eski / ekran görüntüsü QR geçersizdir.</p>
+      <div class="shift-qr-canvas-wrap">
+        <canvas id="shiftQrCanvas" width="280" height="280"></canvas>
+      </div>
+      <div class="shift-qr-timer" id="shiftQrTimer">—</div>
+      <p class="shift-qr-token" id="shiftQrTokenHint"></p>
+      <p class="credit-hint" style="margin-top:16px">Bu sayfayı işyeri bilgisayarında açık bırakın.</p>
+    </div>`;
+
+  const refresh = async () => {
+    try {
+      const data = await api('GET', '/shifts/qr');
+      const canvas = document.getElementById('shiftQrCanvas');
+      const hint = document.getElementById('shiftQrTokenHint');
+      const timerEl = document.getElementById('shiftQrTimer');
+      if (!canvas || typeof QRCode === 'undefined') {
+        if (hint) hint.textContent = data.payload || data.token;
+        return;
+      }
+      await QRCode.toCanvas(canvas, data.payload || data.token, {
+        width: 280,
+        margin: 2,
+        color: { dark: '#1a1a1a', light: '#ffffff' },
+      });
+      if (hint) hint.textContent = '';
+      const ends = new Date(data.expiresAt).getTime();
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+        if (timerEl) timerEl.textContent = left > 0 ? `${left} sn` : 'Yenileniyor…';
+        if (left <= 0) void refresh();
+      };
+      tick();
+      if (shiftQrPollTimer) clearInterval(shiftQrPollTimer);
+      shiftQrPollTimer = setInterval(tick, 500);
+    } catch (e) {
+      toast(e.message || 'QR alınamadı');
+    }
+  };
+  await refresh();
+}
+
+function extractShiftQrToken(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/MUTLU\.\d+\.[A-Za-z0-9_-]+/);
+  return m ? m[0] : s;
+}
+
+async function openQrScannerModal({ title, onToken }) {
+  stopShiftQrScanner();
+  openModal(title, `
+    <p class="credit-hint">Kamerayı işyeri ekranındaki QR’a tutun.</p>
+    <div id="shiftQrReader" class="shift-qr-reader"></div>
+    <div class="modal-footer" style="padding:8px 0 0">
+      <button type="button" class="btn btn-secondary" id="shiftQrCancelBtn">İptal</button>
+    </div>
+  `);
+  document.getElementById('shiftQrCancelBtn').onclick = () => {
+    stopShiftQrScanner();
+    closeModal();
+  };
+
+  if (typeof Html5Qrcode === 'undefined') {
+    toast('QR okuyucu yüklenemedi — sayfayı yenileyin');
+    return;
+  }
+
+  const readerId = 'shiftQrReader';
+  shiftQrScanner = new Html5Qrcode(readerId);
+  let handled = false;
+  try {
+    await shiftQrScanner.start(
+      { facingMode: 'environment' },
+      { fps: 8, qrbox: { width: 240, height: 240 } },
+      async (decoded) => {
+        if (handled) return;
+        handled = true;
+        const qrToken = extractShiftQrToken(decoded);
+        stopShiftQrScanner();
+        closeModal();
+        try {
+          await onToken(qrToken);
+        } catch (e) {
+          toast(e.message || 'İşlem başarısız');
+        }
+      }
+    );
+  } catch (e) {
+    toast(e?.message || 'Kamera açılamadı — tarayıcı izni verin');
+    closeModal();
+  }
+}
+
+/** Giriş ekranı: nick+şifre + QR → login-shift */
+async function startLoginShiftQrScan() {
+  const username = (document.getElementById('loginUsername') || document.getElementById('loginEmail'))?.value?.trim();
+  const password = document.getElementById('loginPassword')?.value;
+  const errEl = document.getElementById('loginError');
+  if (errEl) errEl.classList.add('hidden');
+  if (!username || !password) {
+    if (errEl) {
+      errEl.textContent = 'Önce kullanıcı adı ve şifreyi girin, sonra QR okutun';
+      errEl.classList.remove('hidden');
+    }
+    toast('Önce kullanıcı adı ve şifre girin');
+    return;
+  }
+
+  await openQrScannerModal({
+    title: 'QR ile vardiya başlat',
+    onToken: async (qrToken) => {
+      document.getElementById('loginBtn').disabled = true;
+      try {
+        const data = await api('POST', '/auth/login-shift', { username, password, qrToken });
+        token = data.token;
+        currentUser = data.user;
+        localStorage.setItem('token', token);
+        toast(data.message || 'Vardiya başlatıldı');
+        showApp();
+        syncOfflineQueue();
+      } finally {
+        const btn = document.getElementById('loginBtn');
+        if (btn) btn.disabled = false;
+      }
+    },
+  });
+}
+
+/** Uygulama içi: personel QR ile vardiya */
+async function startLoggedInShiftQrScan() {
+  await openQrScannerModal({
+    title: 'QR ile vardiya başlat',
+    onToken: (qrToken) => startShiftWithQrToken(qrToken),
+  });
+}
+
+window.showShiftQrDisplay = showShiftQrDisplay;
+window.startLoginShiftQrScan = startLoginShiftQrScan;
+window.startLoggedInShiftQrScan = startLoggedInShiftQrScan;
+window.startShiftAdminBypass = startShiftAdminBypass;
+
+async function startShift() {
+  // Eski buton — personeli QR tarama ekranına yönlendir
+  if (currentUser?.role === 'STAFF') {
+    return startLoggedInShiftQrScan();
+  }
+  return startShiftAdminBypass();
 }
 
 function openEndShiftModal(shiftId) {
@@ -1539,6 +1724,7 @@ async function showDashboard() {
       </div>
       <p class="section-label">Yönetim</p>
       <div class="menu-grid">
+        ${menuCard('📱','Vardiya QR Ekranı','İşyeri PC — 30 sn’de bir yenilenen kod','showShiftQrDisplay()')}
         ${menuCard('🔧','İş Emirleri', openOrders > 0 ? `${openOrders} açık görev` : 'Görev oluştur / takip et','showWorkOrders()', openOrders > 0)}
         ${menuCard('📁','Evrak Merkezi', docHint,'showDocumentsAdmin()', warnN > 0)}
         ${menuCard('📢','Duyurular','Kurallar ve duyuru yayınla','showAnnouncementsAdmin()')}
