@@ -1543,7 +1543,7 @@ async function showDashboard() {
       <div class="menu-grid">
         ${menuCard('🧾','Fiş Kontrol','Tüm fiş fotoğraflarını görüntüle','showTransactions()')}
         ${menuCard('⚠️','Şüpheli İşlemler','İnceleme gerektiren','showSuspicious()',true)}
-        ${menuCard('👥','Pompacı Analizi','Performans karşılaştırma','showStaffPerformance()')}
+        ${menuCard('👥','Personel Performansı','Satış, vardiya, OCR ve geç kalma','showStaffPerformance()')}
         ${menuCard('✅','Onay Bekleyenler','Düzeltme talepleri','showCorrections()')}
       </div>`;
   } catch (e) {
@@ -3303,32 +3303,64 @@ async function changePassword() {
 }
 
 // ===== STAFF PERFORMANCE =====
+function renderStars(rating) {
+  const r = Number(rating) || 0;
+  const full = Math.floor(r);
+  const half = r - full >= 0.5 ? 1 : 0;
+  const empty = 5 - full - half;
+  return '★'.repeat(full) + (half ? '½' : '') + '☆'.repeat(empty);
+}
+
+function fmtMinutes(m) {
+  if (m == null || Number.isNaN(m)) return '—';
+  if (m < 60) return `${m} dk`;
+  const h = Math.floor(m / 60);
+  const mins = Math.round(m % 60);
+  return mins ? `${h} sa ${mins} dk` : `${h} sa`;
+}
+
 async function showStaffPerformance() {
-  setHeaderTitle('Pompacı Analizi');
+  if (!isAdmin() && currentUser?.role !== 'ACCOUNTANT') {
+    return toast('Bu menü yalnızca yönetici / muhasebe içindir');
+  }
+  setHeaderTitle('Personel Performansı');
   document.getElementById('mainContent').innerHTML =
-    pageHeader('Pompacı Analizi', 'showDashboard()') + '<div id="staffList"><p class="empty">Yükleniyor...</p></div>';
+    pageHeader('Personel Performansı', 'showDashboard()') + `
+    <p class="credit-hint" style="margin-bottom:14px">
+      Dönem: bu ay. Geç kalma: vardiya başlangıcı <strong>09:00</strong> (İstanbul) sonrası.
+      Yıldız skoru satış, OCR, iptal ve gecikmeden hesaplanır. Müşteri değerlendirmesi henüz yok.
+    </p>
+    <div id="staffList"><p class="empty">Yükleniyor...</p></div>`;
 
   try {
     const data = await api('GET', '/reports/staff-performance');
     const list = document.getElementById('staffList');
-    if (!data.staff.length) {
-      list.innerHTML = '<p class="empty">Veri yok</p>';
+    if (!data.staff?.length) {
+      list.innerHTML = '<p class="empty">Aktif pompacı yok</p>';
       return;
     }
-    list.innerHTML = data.staff.map((s, i) => `
+    list.innerHTML = data.staff.map((s, i) => {
+      const stars = renderStars(s.starRating);
+      const nick = s.staff.username || s.staff.email || '';
+      return `
       <div class="staff-card">
         <div class="staff-header">
           <div class="staff-rank">${i + 1}</div>
-          <div>
-            <strong>${s.staff.name}</strong>
-            ${isAdmin() && s.suspiciousCount > 0 ? `<span class="tx-badge suspicious">${s.suspiciousCount} şüpheli</span>` : ''}
+          <div class="staff-header-text">
+            <strong>${escHtml(s.staff.name)}</strong>
+            ${nick ? `<span class="staff-nick">${escHtml(nick)}</span>` : ''}
+            <div class="staff-stars" title="${s.starRating} / 5">${stars}</div>
           </div>
         </div>
-        <div class="staff-row"><span>İşlem sayısı</span><strong>${s.transactionCount}</strong></div>
+        <div class="staff-row"><span>Satış sayısı</span><strong>${s.transactionCount}</strong></div>
         <div class="staff-row"><span>Toplam ciro</span><strong>${fmt(s.totalAmount)}</strong></div>
-        <div class="staff-row"><span>Ortalama işlem</span><strong>${fmt(s.averageAmount)}</strong></div>
-        ${isAdmin() ? `<div class="staff-row"><span>Şüpheli oranı</span><strong>%${s.suspiciousRate}</strong></div>` : ''}
-      </div>`).join('');
+        <div class="staff-row"><span>Ortalama işlem süresi</span><strong>${fmtMinutes(s.avgTransactionMinutes)}</strong></div>
+        <div class="staff-row"><span>İptal oranı</span><strong>%${s.cancelRate ?? 0} <span class="staff-muted">(${s.cancelCount || 0})</span></strong></div>
+        ${isAdmin() ? `<div class="staff-row"><span>OCR hata oranı</span><strong>%${s.ocrErrorRate ?? 0} <span class="staff-muted">(${s.ocrErrorCount || 0})</span></strong></div>` : ''}
+        <div class="staff-row"><span>Geç kalma</span><strong>${s.lateShiftCount || 0} / ${s.shiftCount || 0} vardiya${s.avgLateMinutes ? ` · ort. ${s.avgLateMinutes} dk` : ''}</strong></div>
+        <div class="staff-row"><span>Vardiya süresi</span><strong>${s.shiftHours ?? 0} saat <span class="staff-muted">(${s.shiftCount || 0} vardiya)</span></strong></div>
+      </div>`;
+    }).join('');
   } catch (e) {
     document.getElementById('staffList').innerHTML = `<p class="empty">${e.message}</p>`;
   }

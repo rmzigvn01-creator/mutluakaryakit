@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { UserRole, SuspicionStatus } from "@prisma/client";
+import {
+  UserRole,
+  SuspicionStatus,
+  CorrectionType,
+  CorrectionStatus,
+} from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { authMiddleware, requireRoles, AuthRequest } from "../middleware/auth.js";
 import { sanitizeTransactionForRole } from "../lib/roles.js";
@@ -15,7 +20,75 @@ const router = Router();
 router.use(authMiddleware);
 router.use(requireRoles(UserRole.ADMIN, UserRole.ACCOUNTANT));
 
-// Pompacı performans analizi
+const SHIFT_START_HOUR_TR = 9; // Sabit vardiya başlangıcı 09:00 (İstanbul)
+const MAX_GAP_MS = 2 * 60 * 60 * 1000; // işlem süresi için max ara (mola sayılmaz)
+
+function istanbulParts(d: Date) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value || "0";
+  return {
+    hour: parseInt(get("hour"), 10),
+    minute: parseInt(get("minute"), 10),
+  };
+}
+
+/** 09:00'dan kaç dk sonra başladı (0 = zamanında veya erken) */
+function minutesLateForShift(startedAt: Date): number {
+  const { hour, minute } = istanbulParts(startedAt);
+  const startedMins = hour * 60 + minute;
+  const dueMins = SHIFT_START_HOUR_TR * 60;
+  return Math.max(0, startedMins - dueMins);
+}
+
+function avgTransactionGapMinutes(timestamps: Date[]): number | null {
+  if (timestamps.length < 2) return null;
+  const sorted = [...timestamps].sort((a, b) => a.getTime() - b.getTime());
+  const gaps: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i].getTime() - sorted[i - 1].getTime();
+    if (gap > 0 && gap <= MAX_GAP_MS) gaps.push(gap);
+  }
+  if (!gaps.length) return null;
+  const avgMs = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  return Math.round((avgMs / 60000) * 10) / 10;
+}
+
+function formatDurationHours(ms: number): number {
+  return Math.round((ms / 3600000) * 10) / 10;
+}
+
+/** 1–5 yıldız: satış, OCR, iptal, geç kalma */
+function computeStarRating(m: {
+  transactionCount: number;
+  ocrErrorRate: number;
+  cancelRate: number;
+  lateShiftRate: number;
+  avgLateMinutes: number;
+}): number {
+  let score = 5;
+  if (m.transactionCount === 0) return 1;
+  if (m.ocrErrorRate > 25) score -= 1.5;
+  else if (m.ocrErrorRate > 12) score -= 1;
+  else if (m.ocrErrorRate > 5) score -= 0.5;
+  if (m.cancelRate > 15) score -= 1.5;
+  else if (m.cancelRate > 8) score -= 1;
+  else if (m.cancelRate > 3) score -= 0.5;
+  if (m.lateShiftRate > 40) score -= 1.5;
+  else if (m.lateShiftRate > 20) score -= 1;
+  else if (m.avgLateMinutes > 15) score -= 0.5;
+  if (m.transactionCount >= 80) score += 0.25;
+  return Math.min(5, Math.max(1, Math.round(score * 2) / 2));
+}
+
+// Personel performansı
 router.get("/staff-performance", async (req: AuthRequest, res) => {
   const { from, to } = req.query as { from?: string; to?: string };
 
@@ -28,8 +101,9 @@ router.get("/staff-performance", async (req: AuthRequest, res) => {
     where: {
       stationId: req.user!.stationId,
       role: UserRole.STAFF,
+      isActive: true,
     },
-    select: { id: true, name: true, email: true },
+    select: { id: true, name: true, email: true, username: true },
   });
 
   const report = await Promise.all(
@@ -41,17 +115,23 @@ router.get("/staff-performance", async (req: AuthRequest, res) => {
         createdAt: { gte: dateFrom, lte: dateTo },
       };
 
-      const [count, sum, mismatch, datetimeMismatch, unreadable, corrections] = await Promise.all([
+      const [
+        count,
+        sum,
+        mismatch,
+        datetimeMismatch,
+        unreadable,
+        cancelApproved,
+        txTimes,
+        shifts,
+      ] = await Promise.all([
         prisma.transaction.count({ where: baseWhere }),
         prisma.transaction.aggregate({
           where: baseWhere,
           _sum: { enteredAmount: true },
         }),
         prisma.transaction.count({
-          where: {
-            ...baseWhere,
-            suspicionStatus: SuspicionStatus.SUSPICIOUS_MISMATCH,
-          },
+          where: { ...baseWhere, suspicionStatus: SuspicionStatus.SUSPICIOUS_MISMATCH },
         }),
         prisma.transaction.count({
           where: {
@@ -60,22 +140,64 @@ router.get("/staff-performance", async (req: AuthRequest, res) => {
           },
         }),
         prisma.transaction.count({
-          where: {
-            ...baseWhere,
-            suspicionStatus: SuspicionStatus.SUSPICIOUS_UNREADABLE,
-          },
+          where: { ...baseWhere, suspicionStatus: SuspicionStatus.SUSPICIOUS_UNREADABLE },
         }),
         prisma.correctionRequest.count({
           where: {
             requestedById: user.id,
+            type: CorrectionType.DELETE,
+            status: CorrectionStatus.APPROVED,
             createdAt: { gte: dateFrom, lte: dateTo },
           },
+        }),
+        prisma.transaction.findMany({
+          where: baseWhere,
+          select: { createdAt: true },
+          orderBy: { createdAt: "asc" },
+          take: 2000,
+        }),
+        prisma.shift.findMany({
+          where: {
+            userId: user.id,
+            stationId: req.user!.stationId,
+            startedAt: { gte: dateFrom, lte: dateTo },
+          },
+          select: { startedAt: true, endedAt: true, status: true },
         }),
       ]);
 
       const totalAmount = sum._sum.enteredAmount ?? 0;
-      const suspiciousTotal = mismatch + datetimeMismatch + unreadable;
-      const suspiciousRate = count > 0 ? (suspiciousTotal / count) * 100 : 0;
+      const ocrErrorCount = mismatch + datetimeMismatch + unreadable;
+      const ocrErrorRate = count > 0 ? (ocrErrorCount / count) * 100 : 0;
+      const cancelDenom = count + cancelApproved;
+      const cancelRate = cancelDenom > 0 ? (cancelApproved / cancelDenom) * 100 : 0;
+      const avgTxnMinutes = avgTransactionGapMinutes(txTimes.map((t) => t.createdAt));
+
+      let shiftMs = 0;
+      let lateCount = 0;
+      let lateMinutesSum = 0;
+      const now = Date.now();
+      for (const sh of shifts) {
+        const end = sh.endedAt ? sh.endedAt.getTime() : now;
+        shiftMs += Math.max(0, end - sh.startedAt.getTime());
+        const late = minutesLateForShift(sh.startedAt);
+        if (late > 0) {
+          lateCount += 1;
+          lateMinutesSum += late;
+        }
+      }
+      const shiftCount = shifts.length;
+      const lateShiftRate = shiftCount > 0 ? (lateCount / shiftCount) * 100 : 0;
+      const avgLateMinutes =
+        lateCount > 0 ? Math.round(lateMinutesSum / lateCount) : 0;
+
+      const starRating = computeStarRating({
+        transactionCount: count,
+        ocrErrorRate,
+        cancelRate,
+        lateShiftRate,
+        avgLateMinutes,
+      });
 
       const byType = await prisma.transaction.groupBy({
         by: ["type"],
@@ -90,12 +212,23 @@ router.get("/staff-performance", async (req: AuthRequest, res) => {
         transactionCount: count,
         totalAmount,
         averageAmount: count > 0 ? totalAmount / count : 0,
-        suspiciousCount: suspiciousTotal,
+        avgTransactionMinutes: avgTxnMinutes,
+        cancelCount: cancelApproved,
+        cancelRate: Math.round(cancelRate * 10) / 10,
+        ocrErrorCount,
+        ocrErrorRate: Math.round(ocrErrorRate * 10) / 10,
+        suspiciousCount: ocrErrorCount,
         suspiciousMismatch: mismatch,
         suspiciousDateTime: datetimeMismatch,
         suspiciousUnreadable: unreadable,
-        suspiciousRate: Math.round(suspiciousRate * 100) / 100,
-        correctionRequestCount: corrections,
+        suspiciousRate: Math.round(ocrErrorRate * 10) / 10,
+        shiftCount,
+        shiftHours: formatDurationHours(shiftMs),
+        lateShiftCount: lateCount,
+        lateShiftRate: Math.round(lateShiftRate * 10) / 10,
+        avgLateMinutes,
+        starRating,
+        shiftStartHour: SHIFT_START_HOUR_TR,
         breakdownByType: byType.map((b) => ({
           type: b.type,
           count: b._count.id,
@@ -105,7 +238,10 @@ router.get("/staff-performance", async (req: AuthRequest, res) => {
     })
   );
 
-  report.sort((a, b) => b.totalAmount - a.totalAmount);
+  report.sort((a, b) => {
+    if (b.starRating !== a.starRating) return b.starRating - a.starRating;
+    return b.totalAmount - a.totalAmount;
+  });
 
   const staffReport =
     req.user!.role === UserRole.ADMIN
@@ -117,10 +253,13 @@ router.get("/staff-performance", async (req: AuthRequest, res) => {
           suspiciousDateTime: 0,
           suspiciousUnreadable: 0,
           suspiciousRate: 0,
+          ocrErrorCount: 0,
+          ocrErrorRate: 0,
         }));
 
   res.json({
     period: { from: dateFrom, to: dateTo },
+    shiftStartHour: SHIFT_START_HOUR_TR,
     staff: staffReport,
   });
 });
