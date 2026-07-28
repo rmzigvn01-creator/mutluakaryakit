@@ -1505,7 +1505,7 @@ async function showAnnouncementsAdmin() {
   document.getElementById('mainContent').innerHTML =
     pageHeader('Duyurular', 'showDashboard()') + `
     <div class="day-close-toolbar">
-      <p class="credit-hint" style="margin:0;flex:1">Aktif duyurular ana sayfada turuncu kutuda görünür.</p>
+      <p class="credit-hint" style="margin:0;flex:1">Aktif duyurular ana sayfada yeşil kutuda görünür.</p>
       <button class="btn btn-primary" onclick="openAnnouncementModal()">+ Duyuru</button>
     </div>
     <div id="annList"><p class="empty">Yükleniyor...</p></div>`;
