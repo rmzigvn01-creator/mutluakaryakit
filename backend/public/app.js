@@ -1669,44 +1669,60 @@ function openUserModalById(id) {
 
 function openUserModal(user = null) {
   const isEdit = Boolean(user);
+  const editId = isEdit ? String(user.id) : '';
   const nick = user?.username || (user?.email ? user.email.split('@')[0] : '');
   openModal(isEdit ? 'Üye Düzenle' : 'Yeni Üye', `
-    <div id="userFormError" class="error-msg hidden"></div>
-    <div class="form-group">
-      <label>Ad Soyad *</label>
-      <input type="text" id="userName" value="${escHtml(user?.name || '')}" placeholder="Örn: Ali Yılmaz" autocomplete="off">
-    </div>
-    <div class="form-group">
-      <label>Kullanıcı adı (nick) *</label>
-      <input type="text" id="userUsername" value="${escHtml(nick)}" placeholder="örn: ali"
-        autocomplete="off" autocapitalize="none" spellcheck="false">
-      <p class="credit-hint">Giriş bu nick ile yapılır. Sadece harf/rakam (örn: ali, pompaci1).</p>
-    </div>
-    <div class="form-group">
-      <label>Rol *</label>
-      <select id="userRole">
-        <option value="STAFF" ${!user || user.role === 'STAFF' ? 'selected' : ''}>Pompacı</option>
-        <option value="ACCOUNTANT" ${user?.role === 'ACCOUNTANT' ? 'selected' : ''}>Muhasebeci</option>
-        <option value="ADMIN" ${user?.role === 'ADMIN' ? 'selected' : ''}>Yönetici</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>${isEdit ? 'Yeni şifre (boş bırakırsanız değişmez)' : 'Şifre *'}</label>
-      <input type="password" id="userPassword" placeholder="${isEdit ? '••••••••' : 'En az 6 karakter'}" autocomplete="new-password">
-    </div>
-    ${isEdit ? `
-    <div class="form-group">
-      <label>Durum</label>
-      <select id="userActive" ${user.id === currentUser.id ? 'disabled' : ''}>
-        <option value="true" ${user.isActive ? 'selected' : ''}>Aktif</option>
-        <option value="false" ${!user.isActive ? 'selected' : ''}>Pasif</option>
-      </select>
-      ${user.id === currentUser.id ? '<p class="credit-hint">Kendi hesabınızı pasifleştiremezsiniz.</p>' : ''}
-    </div>` : ''}
-  `, `
-    <button type="button" class="btn btn-secondary" onclick="closeModal()">İptal</button>
-    <button type="button" class="btn btn-primary" id="userSaveBtn" onclick="${isEdit ? `saveUser('${user.id}')` : 'saveUser()'}">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
+    <form id="userForm" autocomplete="off">
+      <div id="userFormError" class="error-msg hidden"></div>
+      <div class="form-group">
+        <label for="userName">Ad Soyad *</label>
+        <input type="text" id="userName" name="name" value="${escHtml(user?.name || '')}" placeholder="Örn: Ali Yılmaz" required>
+      </div>
+      <div class="form-group">
+        <label for="userUsername">Kullanıcı adı (nick) *</label>
+        <input type="text" id="userUsername" name="username" value="${escHtml(nick)}" placeholder="örn: ali"
+          autocapitalize="none" spellcheck="false" required>
+        <p class="credit-hint">Giriş bu nick ile yapılır. Sadece harf/rakam (örn: ali, pompaci1).</p>
+      </div>
+      <div class="form-group">
+        <label for="userRole">Rol *</label>
+        <select id="userRole" name="role">
+          <option value="STAFF" ${!user || user.role === 'STAFF' ? 'selected' : ''}>Pompacı</option>
+          <option value="ACCOUNTANT" ${user?.role === 'ACCOUNTANT' ? 'selected' : ''}>Muhasebeci</option>
+          <option value="ADMIN" ${user?.role === 'ADMIN' ? 'selected' : ''}>Yönetici</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="userPassword">${isEdit ? 'Yeni şifre (boş bırakırsanız değişmez)' : 'Şifre *'}</label>
+        <input type="password" id="userPassword" name="password" placeholder="${isEdit ? '••••••••' : 'En az 6 karakter'}" autocomplete="new-password" ${isEdit ? '' : 'required minlength="6"'}>
+      </div>
+      ${isEdit ? `
+      <div class="form-group">
+        <label for="userActive">Durum</label>
+        <select id="userActive" name="isActive" ${user.id === currentUser.id ? 'disabled' : ''}>
+          <option value="true" ${user.isActive ? 'selected' : ''}>Aktif</option>
+          <option value="false" ${!user.isActive ? 'selected' : ''}>Pasif</option>
+        </select>
+        ${user.id === currentUser.id ? '<p class="credit-hint">Kendi hesabınızı pasifleştiremezsiniz.</p>' : ''}
+      </div>` : ''}
+      <div class="modal-footer" style="padding:8px 0 0;margin:0 -0">
+        <button type="button" class="btn btn-secondary" id="userCancelBtn">İptal</button>
+        <button type="submit" class="btn btn-primary" id="userSaveBtn">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
+      </div>
+    </form>
   `);
+
+  const form = document.getElementById('userForm');
+  const cancelBtn = document.getElementById('userCancelBtn');
+  if (cancelBtn) cancelBtn.onclick = () => closeModal();
+  if (form) {
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void saveUser(editId || null);
+      return false;
+    };
+  }
 }
 
 function showUserFormError(msg) {
@@ -1717,6 +1733,7 @@ function showUserFormError(msg) {
   }
   el.textContent = msg;
   el.classList.remove('hidden');
+  try { el.scrollIntoView({ block: 'nearest' }); } catch (_) {}
 }
 
 function normalizeNickClient(raw) {
@@ -1734,75 +1751,78 @@ function normalizeNickClient(raw) {
 }
 
 async function saveUser(id) {
-  const errEl = document.getElementById('userFormError');
-  if (errEl) {
-    errEl.classList.add('hidden');
-    errEl.textContent = '';
-  }
-
-  const nameEl = document.getElementById('userName');
-  const nickEl = document.getElementById('userUsername');
-  const roleEl = document.getElementById('userRole');
-  const passEl = document.getElementById('userPassword');
-  const btn = document.getElementById('userSaveBtn');
-
-  if (!nameEl || !nickEl || !roleEl || !passEl) {
-    toast('Form yüklenemedi — sayfayı yenileyip tekrar deneyin');
-    return;
-  }
-
-  const name = nameEl.value.trim();
-  let username = normalizeNickClient(nickEl.value);
-  nickEl.value = username;
-  const role = roleEl.value;
-  const password = passEl.value;
-
-  if (!name) return showUserFormError('Ad soyad zorunlu');
-  if (!username) return showUserFormError('Kullanıcı adı (nick) zorunlu');
-  if (username.length < 3) return showUserFormError('Nick en az 3 karakter olmalı');
-  if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
-    return showUserFormError('Nick sadece harf, rakam, nokta, alt çizgi veya tire olabilir');
-  }
-
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Kaydediliyor...';
-  }
-
   try {
-    if (id) {
+    const errEl = document.getElementById('userFormError');
+    if (errEl) {
+      errEl.classList.add('hidden');
+      errEl.textContent = '';
+    }
+
+    const nameEl = document.getElementById('userName');
+    const nickEl = document.getElementById('userUsername');
+    const roleEl = document.getElementById('userRole');
+    const passEl = document.getElementById('userPassword');
+    const btn = document.getElementById('userSaveBtn');
+
+    if (!nameEl || !nickEl || !roleEl || !passEl) {
+      toast('Form yüklenemedi — sayfayı yenileyip tekrar deneyin (Cmd+Shift+R)');
+      return;
+    }
+
+    const name = nameEl.value.trim();
+    const username = normalizeNickClient(nickEl.value);
+    nickEl.value = username;
+    const role = roleEl.value;
+    const password = passEl.value;
+    const isEdit = Boolean(id);
+
+    if (!name) return showUserFormError('Ad soyad zorunlu');
+    if (!username) return showUserFormError('Kullanıcı adı (nick) zorunlu');
+    if (username.length < 3) return showUserFormError('Nick en az 3 karakter olmalı');
+    if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
+      return showUserFormError('Nick sadece harf, rakam, nokta, alt çizgi veya tire olabilir');
+    }
+    if (!isEdit && (!password || password.length < 6)) {
+      return showUserFormError('Şifre en az 6 karakter olmalı');
+    }
+    if (isEdit && password && password.length < 6) {
+      return showUserFormError('Şifre en az 6 karakter olmalı');
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Kaydediliyor...';
+    }
+
+    if (isEdit) {
       const body = { name, username, role };
       const activeEl = document.getElementById('userActive');
       if (activeEl && !activeEl.disabled) body.isActive = activeEl.value === 'true';
-      if (password) {
-        if (password.length < 6) {
-          showUserFormError('Şifre en az 6 karakter olmalı');
-          return;
-        }
-        body.password = password;
-      }
+      if (password) body.password = password;
       await api('PATCH', `/admin/users/${id}`, body);
       toast('Üye güncellendi');
     } else {
-      if (!password || password.length < 6) {
-        showUserFormError('Şifre en az 6 karakter olmalı');
-        return;
-      }
       await api('POST', '/admin/users', { name, username, password, role });
       toast('Üye eklendi');
     }
     closeModal();
     await showUsers();
   } catch (e) {
+    console.error('saveUser error', e);
     showUserFormError(e.message || 'Kayıt başarısız');
     toast(e.message || 'Kayıt başarısız');
   } finally {
-    if (btn && document.getElementById('userSaveBtn')) {
+    const btn = document.getElementById('userSaveBtn');
+    if (btn) {
       btn.disabled = false;
       btn.textContent = id ? 'Güncelle' : 'Kaydet';
     }
   }
 }
+
+window.saveUser = saveUser;
+window.openUserModal = openUserModal;
+window.openUserModalById = openUserModalById;
 
 // ===== SUSPICIOUS =====
 async function showSuspicious() {
