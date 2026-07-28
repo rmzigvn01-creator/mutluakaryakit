@@ -1794,12 +1794,44 @@ body {
   border: 2px solid var(--po-border);
   box-shadow: var(--shadow);
 }
+.shift-qr-kiosk-full {
+  padding: 28px 16px 40px;
+  min-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.shift-qr-brand {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--po-gray);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.shift-qr-sub {
+  font-size: 14px;
+  color: var(--po-gray);
+  line-height: 1.45;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+.shift-qr-warn {
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #B71C1C;
+  max-width: 340px;
+  line-height: 1.4;
+}
 .shift-qr-timer {
-  font-size: 28px;
+  font-size: 42px;
   font-weight: 800;
   color: var(--po-red);
-  margin-top: 8px;
+  margin-top: 12px;
   letter-spacing: .04em;
+  font-variant-numeric: tabular-nums;
 }
 .shift-qr-token {
   font-size: 11px;

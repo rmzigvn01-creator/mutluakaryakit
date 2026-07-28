@@ -93,18 +93,16 @@ router.get("/qr", requireRoles(UserRole.ADMIN), async (req: AuthRequest, res) =>
   });
 });
 
-// Vardiya başlat — personel için güncel QR zorunlu
+// Vardiya başlat — yalnızca işyeri ekranındaki güncel QR ile
 router.post("/start", requireRoles(UserRole.STAFF, UserRole.ADMIN), async (req: AuthRequest, res) => {
   const { qrToken } = req.body as { qrToken?: string };
 
-  if (req.user!.role === UserRole.STAFF) {
-    if (!qrToken || !verifyShiftQrToken(qrToken, req.user!.stationId)) {
-      res.status(400).json({
-        error:
-          "Geçersiz veya süresi dolmuş QR. İşyeri ekranındaki güncel kodu okutun (30 sn).",
-      });
-      return;
-    }
+  if (!qrToken || !verifyShiftQrToken(qrToken, req.user!.stationId)) {
+    res.status(400).json({
+      error:
+        "Geçersiz veya süresi dolmuş QR. Yalnızca işyeri bilgisayarındaki güncel kod kabul edilir (30 sn).",
+    });
+    return;
   }
 
   const existing = await prisma.shift.findFirst({
