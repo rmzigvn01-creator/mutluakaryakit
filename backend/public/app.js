@@ -568,27 +568,16 @@ async function showHome() {
   html += menuCard('🧾', 'İşlem Listesi', 'Tüm satış ve ödeme kayıtları', 'showTransactions()');
   html += menuCard('⏱', 'Vardiya Raporları', 'Pompacı vardiya geçmişi', 'showShifts()');
 
-  if (isAdmin || isAccountant) {
+  if (isAccountant && !isAdmin) {
     html += menuCard('🌙', 'Gün Sonu Raporu', 'Günlük kapanış özeti ve indirme', 'showDayClose()');
+    html += menuCard('✅', 'Düzeltme Talepleri', 'Onay bekleyen / açılan talepler', 'showCorrections()');
+    html += menuCard('📥', 'Excel Raporu', 'Dönem kayıtlarını indir', 'showExport()');
   }
 
   if (isAdmin) {
-    html += menuCard('📊', 'Yönetici Paneli', 'Günlük özet ve istatistikler', 'showDashboard()');
-    html += menuCard('📢', 'Duyurular', 'Kurallar ve duyuru yayınla', 'showAnnouncementsAdmin()');
-    html += menuCard('👤', 'Üyeler', 'Pompacı / muhasebeci ekle', 'showUsers()');
-    html += menuCard('📒', 'Veresiye', 'Müşteri borçları ve tahsilat', 'showCreditCustomers()');
-    html += menuCard('🚗', 'Şirket Araçları', 'Araç yakıt takibi', 'showVehicles()');
-    html += menuCard('🌾', 'Mutlu Tarım Harcamalar', 'Tedarikçi borçları ve ödemeler', 'showExpenseSuppliers()');
-    html += menuCard('🧾', 'Fiş Kontrol', 'Tüm fiş fotoğraflarını görüntüle', 'showTransactions()');
-    html += menuCard('⚠️', 'Şüpheli İşlemler', 'Tutarsız fiş / tutar uyarıları', 'showSuspicious()', true);
-    html += menuCard('👥', 'Pompacı Analizi', 'Ay sonu performans karşılaştırması', 'showStaffPerformance()');
-    html += menuCard('✅', 'Onay Bekleyenler', 'Düzeltme ve silme talepleri', 'showCorrections()');
-  }
-  if (isAccountant) {
-    html += menuCard('✅', 'Düzeltme Talepleri', 'Onay bekleyen / açılan talepler', 'showCorrections()');
+    html += menuCard('📊', 'Yönetici Paneli', 'Duyuru, üye, veresiye ve kontroller', 'showDashboard()');
   }
 
-  html += menuCard('📥', 'Excel Raporu', 'Dönem kayıtlarını indir', 'showExport()');
   html += menuCard('⚙️', 'Ayarlar', 'Şifre değiştir', 'showSettings()');
 
   html += '</div>';
@@ -1254,7 +1243,7 @@ async function requestCorrection(txId) {
 async function showCorrections() {
   setHeaderTitle('Onay Bekleyenler');
   document.getElementById('mainContent').innerHTML =
-    pageHeader('Düzeltme Talepleri') + '<div id="corrList"><p class="empty">Yükleniyor...</p></div>';
+    pageHeader('Düzeltme Talepleri', isAdmin() ? 'showDashboard()' : 'showHome()') + '<div id="corrList"><p class="empty">Yükleniyor...</p></div>';
 
   try {
     const data = await api('GET', '/corrections?status=PENDING');
@@ -1308,9 +1297,10 @@ async function reviewCorrection(id, action) {
 
 // ===== ADMIN DASHBOARD =====
 async function showDashboard() {
+  if (!isAdmin()) return toast('Bu menü yalnızca yönetici içindir');
   setHeaderTitle('Yönetici Paneli');
   document.getElementById('mainContent').innerHTML =
-    pageHeader('Yönetici Paneli') + '<div id="dashContent"><p class="empty">Yükleniyor...</p></div>';
+    pageHeader('Yönetici Paneli', 'showHome()') + '<div id="dashContent"><p class="empty">Yükleniyor...</p></div>';
 
   try {
     const d = await api('GET', '/admin/dashboard');
@@ -1321,14 +1311,22 @@ async function showDashboard() {
         <div class="stat-card warning"><div class="label">Şüpheli</div><div class="value">${d.suspiciousCount}</div></div>
         <div class="stat-card"><div class="label">Onay Bekleyen</div><div class="value">${d.pendingCorrections}</div></div>
       </div>
+      <p class="section-label">Yönetim</p>
       <div class="menu-grid">
         ${menuCard('📢','Duyurular','Kurallar ve duyuru yayınla','showAnnouncementsAdmin()')}
         ${menuCard('👤','Üyeler','Pompacı / muhasebeci ekle','showUsers()')}
+      </div>
+      <p class="section-label">İşletme</p>
+      <div class="menu-grid">
         ${menuCard('📒','Veresiye','Müşteri borç / tahsilat','showCreditCustomers()')}
         ${menuCard('🚗','Şirket Araçları','Araç yakıt takibi','showVehicles()')}
         ${menuCard('🌾','Mutlu Tarım Harcamalar','Tedarikçi borç / ödeme','showExpenseSuppliers()')}
         ${menuCard('🌙','Gün Sonu Raporu','Günlük kapanış özeti','showDayClose()')}
         ${menuCard('📥','Excel Raporu','Dönem kayıtlarını indir','showExport()')}
+      </div>
+      <p class="section-label">Kontrol</p>
+      <div class="menu-grid">
+        ${menuCard('🧾','Fiş Kontrol','Tüm fiş fotoğraflarını görüntüle','showTransactions()')}
         ${menuCard('⚠️','Şüpheli İşlemler','İnceleme gerektiren','showSuspicious()',true)}
         ${menuCard('👥','Pompacı Analizi','Performans karşılaştırma','showStaffPerformance()')}
         ${menuCard('✅','Onay Bekleyenler','Düzeltme talepleri','showCorrections()')}
@@ -1657,7 +1655,7 @@ async function showDayClose(selectedDate) {
   const date = selectedDate || turkeyToday();
 
   document.getElementById('mainContent').innerHTML =
-    pageHeader('Gün Sonu Raporu') + `
+    pageHeader('Gün Sonu Raporu', isAdmin() ? 'showDashboard()' : 'showHome()') + `
     <div class="day-close-toolbar">
       <div class="form-group" style="margin:0;flex:1">
         <label>Tarih</label>
@@ -1887,7 +1885,7 @@ async function showCreditCustomers(query = '', filters = {}) {
   const f = normalizeLedgerFilters(filters);
   setHeaderTitle('Veresiye');
   document.getElementById('mainContent').innerHTML =
-    pageHeader('Veresiye Müşterileri') + `
+    pageHeader('Veresiye Müşterileri', 'showDashboard()') + `
     <div class="day-close-toolbar">
       <div class="form-group" style="margin:0;flex:1">
         <label>Ara</label>
@@ -2152,7 +2150,7 @@ async function showExpenseSuppliers(query = '', filters = {}) {
   const f = normalizeLedgerFilters(filters);
   setHeaderTitle('Mutlu Tarım');
   document.getElementById('mainContent').innerHTML =
-    pageHeader('Mutlu Tarım Harcamalar') + `
+    pageHeader('Mutlu Tarım Harcamalar', 'showDashboard()') + `
     <div class="day-close-toolbar">
       <div class="form-group" style="margin:0;flex:1">
         <label>Ara</label>
@@ -2466,7 +2464,7 @@ async function showVehicles(query = '', filters = {}) {
   const f = normalizeLedgerFilters(filters);
   setHeaderTitle('Şirket Araçları');
   document.getElementById('mainContent').innerHTML =
-    pageHeader('Şirket Araçları') + `
+    pageHeader('Şirket Araçları', 'showDashboard()') + `
     <div class="day-close-toolbar">
       <div class="form-group" style="margin:0;flex:1">
         <label>Ara</label>
@@ -2704,7 +2702,7 @@ async function changePassword() {
 async function showStaffPerformance() {
   setHeaderTitle('Pompacı Analizi');
   document.getElementById('mainContent').innerHTML =
-    pageHeader('Pompacı Analizi') + '<div id="staffList"><p class="empty">Yükleniyor...</p></div>';
+    pageHeader('Pompacı Analizi', 'showDashboard()') + '<div id="staffList"><p class="empty">Yükleniyor...</p></div>';
 
   try {
     const data = await api('GET', '/reports/staff-performance');
