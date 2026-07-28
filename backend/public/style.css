@@ -877,7 +877,7 @@ body {
   border-radius: 30px;
   font-size: 13px;
   font-weight: 600;
-  z-index: 999;
+  z-index: 10000;
   box-shadow: 0 8px 24px rgba(0,0,0,.3);
   animation: fadeUp .3s ease;
   border-left: 4px solid var(--po-red);

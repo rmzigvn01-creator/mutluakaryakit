@@ -1671,6 +1671,7 @@ function openUserModal(user = null) {
   const isEdit = Boolean(user);
   const nick = user?.username || (user?.email ? user.email.split('@')[0] : '');
   openModal(isEdit ? 'Üye Düzenle' : 'Yeni Üye', `
+    <div id="userFormError" class="error-msg hidden"></div>
     <div class="form-group">
       <label>Ad Soyad *</label>
       <input type="text" id="userName" value="${escHtml(user?.name || '')}" placeholder="Örn: Ali Yılmaz" autocomplete="off">
@@ -1678,8 +1679,8 @@ function openUserModal(user = null) {
     <div class="form-group">
       <label>Kullanıcı adı (nick) *</label>
       <input type="text" id="userUsername" value="${escHtml(nick)}" placeholder="örn: ali"
-        autocomplete="off">
-      <p class="credit-hint">Giriş bu nick ile yapılır (e-posta gerekmez).</p>
+        autocomplete="off" autocapitalize="none" spellcheck="false">
+      <p class="credit-hint">Giriş bu nick ile yapılır. Sadece harf/rakam (örn: ali, pompaci1).</p>
     </div>
     <div class="form-group">
       <label>Rol *</label>
@@ -1703,35 +1704,104 @@ function openUserModal(user = null) {
       ${user.id === currentUser.id ? '<p class="credit-hint">Kendi hesabınızı pasifleştiremezsiniz.</p>' : ''}
     </div>` : ''}
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">İptal</button>
-    <button class="btn btn-primary" onclick="${isEdit ? `saveUser('${user.id}')` : 'saveUser()'}">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
+    <button type="button" class="btn btn-secondary" onclick="closeModal()">İptal</button>
+    <button type="button" class="btn btn-primary" id="userSaveBtn" onclick="${isEdit ? `saveUser('${user.id}')` : 'saveUser()'}">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
   `);
 }
 
+function showUserFormError(msg) {
+  const el = document.getElementById('userFormError');
+  if (!el) {
+    toast(msg);
+    return;
+  }
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function normalizeNickClient(raw) {
+  return String(raw || '')
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9._-]/g, '');
+}
+
 async function saveUser(id) {
-  const name = document.getElementById('userName').value.trim();
-  const username = document.getElementById('userUsername').value.trim();
-  const role = document.getElementById('userRole').value;
-  const password = document.getElementById('userPassword').value;
-  if (!name) return toast('Ad soyad zorunlu');
-  if (!username) return toast('Kullanıcı adı (nick) zorunlu');
+  const errEl = document.getElementById('userFormError');
+  if (errEl) {
+    errEl.classList.add('hidden');
+    errEl.textContent = '';
+  }
+
+  const nameEl = document.getElementById('userName');
+  const nickEl = document.getElementById('userUsername');
+  const roleEl = document.getElementById('userRole');
+  const passEl = document.getElementById('userPassword');
+  const btn = document.getElementById('userSaveBtn');
+
+  if (!nameEl || !nickEl || !roleEl || !passEl) {
+    toast('Form yüklenemedi — sayfayı yenileyip tekrar deneyin');
+    return;
+  }
+
+  const name = nameEl.value.trim();
+  let username = normalizeNickClient(nickEl.value);
+  nickEl.value = username;
+  const role = roleEl.value;
+  const password = passEl.value;
+
+  if (!name) return showUserFormError('Ad soyad zorunlu');
+  if (!username) return showUserFormError('Kullanıcı adı (nick) zorunlu');
+  if (username.length < 3) return showUserFormError('Nick en az 3 karakter olmalı');
+  if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
+    return showUserFormError('Nick sadece harf, rakam, nokta, alt çizgi veya tire olabilir');
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Kaydediliyor...';
+  }
 
   try {
     if (id) {
       const body = { name, username, role };
       const activeEl = document.getElementById('userActive');
       if (activeEl && !activeEl.disabled) body.isActive = activeEl.value === 'true';
-      if (password) body.password = password;
+      if (password) {
+        if (password.length < 6) {
+          showUserFormError('Şifre en az 6 karakter olmalı');
+          return;
+        }
+        body.password = password;
+      }
       await api('PATCH', `/admin/users/${id}`, body);
       toast('Üye güncellendi');
     } else {
-      if (!password || password.length < 6) return toast('Şifre en az 6 karakter olmalı');
+      if (!password || password.length < 6) {
+        showUserFormError('Şifre en az 6 karakter olmalı');
+        return;
+      }
       await api('POST', '/admin/users', { name, username, password, role });
       toast('Üye eklendi');
     }
     closeModal();
-    showUsers();
-  } catch (e) { toast(e.message); }
+    await showUsers();
+  } catch (e) {
+    showUserFormError(e.message || 'Kayıt başarısız');
+    toast(e.message || 'Kayıt başarısız');
+  } finally {
+    if (btn && document.getElementById('userSaveBtn')) {
+      btn.disabled = false;
+      btn.textContent = id ? 'Güncelle' : 'Kaydet';
+    }
+  }
 }
 
 // ===== SUSPICIOUS =====
