@@ -1077,8 +1077,12 @@ function toggleSaleOptions(source) {
 
   const creditOn = Boolean(creditEl?.checked);
   const vehicleOn = Boolean(vehicleEl?.checked);
-  document.getElementById('creditToggleWrap')?.classList.toggle('active', creditOn);
-  document.getElementById('vehicleToggleWrap')?.classList.toggle('active', vehicleOn);
+  const creditWrap = document.getElementById('creditToggleWrap');
+  const vehicleWrap = document.getElementById('vehicleToggleWrap');
+  creditWrap?.classList.toggle('active', creditOn);
+  vehicleWrap?.classList.toggle('active', vehicleOn);
+  creditWrap?.classList.toggle('is-dimmed', vehicleOn);
+  vehicleWrap?.classList.toggle('is-dimmed', creditOn);
   document.getElementById('creditCustomerGroup')?.classList.toggle('hidden', !creditOn);
   document.getElementById('vehicleSelectGroup')?.classList.toggle('hidden', !vehicleOn);
 }

@@ -60,12 +60,12 @@ app.use(express.static(path.join(__dirname, "../public"), {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       return;
     }
-    // app.js?v= sorgusu ile cache kırılır; CSS/SVG uzun süre cache
-    if (filePath.endsWith(".js")) {
-      res.setHeader("Cache-Control", "public, max-age=300, must-revalidate");
+    if (filePath.endsWith(".js") || filePath.endsWith(".css")) {
+      // Sürüm query (?v=) ile cache kırılır; kısa TTL eski sürümü tutmaz
+      res.setHeader("Cache-Control", "public, max-age=60, must-revalidate");
       return;
     }
-    if (filePath.endsWith(".css") || filePath.endsWith(".svg") || filePath.endsWith(".woff2")) {
+    if (filePath.endsWith(".svg") || filePath.endsWith(".woff2")) {
       res.setHeader("Cache-Control", "public, max-age=86400, immutable");
     }
   },
