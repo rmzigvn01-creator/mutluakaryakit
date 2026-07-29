@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { UserRole, WorkOrderStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { config } from "../lib/config.js";
+import { downloadObject, moveLocalFileToStorage, removeObject } from "../lib/storage.js";
 import { authMiddleware, requireRoles, AuthRequest } from "../middleware/auth.js";
 import { isAllowedReceiptUpload } from "../services/image.service.js";
 import { logAudit } from "../services/audit.service.js";
@@ -204,14 +205,18 @@ router.post(
         return;
       }
 
+      const photoMime = mimeFromPath(resolvedPath, req.file.mimetype);
+      const photoKey = await moveLocalFileToStorage(resolvedPath, "work-orders", photoMime);
+
       const order = await prisma.workOrder.update({
         where: { id },
         data: {
           status: WorkOrderStatus.DONE,
           completedById: req.user!.userId,
           completedAt: new Date(),
-          photoPath: resolvedPath,
-          photoMime: mimeFromPath(resolvedPath, req.file.mimetype),
+          photoPath: photoKey ? null : resolvedPath,
+          photoKey,
+          photoMime,
           photoName: req.file.originalname || path.basename(resolvedPath),
         },
         select: selectPublic,
@@ -271,6 +276,9 @@ router.delete("/:id", requireRoles(UserRole.ADMIN), async (req: AuthRequest, res
   }
 
   await prisma.workOrder.delete({ where: { id } });
+  if (existing.photoKey) {
+    await removeObject(existing.photoKey);
+  }
   if (existing.photoPath) {
     try {
       const p = resolveStoredPath(existing.photoPath);
@@ -292,14 +300,38 @@ router.get("/:id/photo", async (req: AuthRequest, res) => {
   const id = routeId(req.params.id);
   const order = await prisma.workOrder.findFirst({
     where: { id, stationId: req.user!.stationId },
-    select: { photoPath: true, photoMime: true, photoName: true, status: true },
+    select: {
+      photoPath: true,
+      photoKey: true,
+      photoMime: true,
+      photoName: true,
+      status: true,
+    },
   });
   if (!order) {
     res.status(404).json({ error: "İş emri bulunamadı" });
     return;
   }
-  if (!order.photoPath) {
+  if (!order.photoKey && !order.photoPath) {
     res.status(404).json({ error: "Fotoğraf yok" });
+    return;
+  }
+
+  const safeName = (order.photoName || "is-emri.jpg").replace(/"/g, "");
+
+  if (order.photoKey) {
+    const stored = await downloadObject(order.photoKey);
+    if (stored) {
+      res.setHeader("Content-Type", order.photoMime || stored.contentType);
+      res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.send(stored.body);
+      return;
+    }
+  }
+
+  if (!order.photoPath) {
+    res.status(404).json({ error: "Fotoğraf dosyası bulunamadı" });
     return;
   }
   const p = resolveStoredPath(order.photoPath);
@@ -307,7 +339,6 @@ router.get("/:id/photo", async (req: AuthRequest, res) => {
     res.status(404).json({ error: "Fotoğraf dosyası bulunamadı" });
     return;
   }
-  const safeName = (order.photoName || "is-emri.jpg").replace(/"/g, "");
   res.setHeader("Content-Type", order.photoMime || mimeFromPath(p));
   res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
   res.setHeader("Cache-Control", "private, max-age=3600");

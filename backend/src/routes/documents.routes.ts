@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { DocumentCategory, UserRole } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { config } from "../lib/config.js";
+import { downloadObject, moveLocalFileToStorage, removeObject } from "../lib/storage.js";
 import { authMiddleware, requireRoles, AuthRequest } from "../middleware/auth.js";
 import { logAudit } from "../services/audit.service.js";
 import { routeId } from "../lib/route-id.js";
@@ -228,6 +229,7 @@ router.post("/", uploadDocument, async (req: AuthRequest, res) => {
     }
     const fileMime = mimeFromPath(resolvedPath, req.file.mimetype);
     const fileBytes = readFileForDb(resolvedPath);
+    const fileKey = await moveLocalFileToStorage(resolvedPath, "documents", fileMime);
 
     const doc = await prisma.stationDocument.create({
       data: {
@@ -237,7 +239,8 @@ router.post("/", uploadDocument, async (req: AuthRequest, res) => {
         note,
         expiresAt: expiresParsed === undefined ? null : expiresParsed,
         fileName: req.file.originalname || path.basename(resolvedPath),
-        filePath: resolvedPath,
+        filePath: fileKey ? null : resolvedPath,
+        fileKey,
         fileData: fileBytes ? (fileBytes as never) : undefined,
         fileMime,
         createdById: req.user!.userId,
@@ -276,7 +279,8 @@ router.patch("/:id", uploadDocument, async (req: AuthRequest, res) => {
       note?: string | null;
       expiresAt?: Date | null;
       fileName?: string;
-      filePath?: string;
+      filePath?: string | null;
+      fileKey?: string | null;
       fileData?: Buffer | null;
       fileMime?: string;
     } = {};
@@ -322,10 +326,25 @@ router.patch("/:id", uploadDocument, async (req: AuthRequest, res) => {
         res.status(500).json({ error: "Dosya diske yazılamadı — tekrar deneyin" });
         return;
       }
+      const newMime = mimeFromPath(resolvedPath, req.file.mimetype);
+      const newKey = await moveLocalFileToStorage(resolvedPath, "documents", newMime);
       data.fileName = req.file.originalname || path.basename(resolvedPath);
-      data.filePath = resolvedPath;
-      data.fileMime = mimeFromPath(resolvedPath, req.file.mimetype);
+      data.filePath = newKey ? null : resolvedPath;
+      data.fileKey = newKey;
+      data.fileMime = newMime;
       data.fileData = readFileForDb(resolvedPath);
+
+      if (existing.fileKey && existing.fileKey !== newKey) {
+        await removeObject(existing.fileKey);
+      }
+      if (existing.filePath && existing.filePath !== resolvedPath) {
+        try {
+          const oldPath = resolveStoredPath(existing.filePath);
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        } catch {
+          /* ignore disk cleanup errors */
+        }
+      }
     }
 
     const doc = await prisma.stationDocument.update({
@@ -359,6 +378,10 @@ router.delete("/:id", async (req: AuthRequest, res) => {
 
   await prisma.stationDocument.delete({ where: { id } });
 
+  if (existing.fileKey) {
+    await removeObject(existing.fileKey);
+  }
+
   if (existing.filePath) {
     try {
       const p = resolveStoredPath(existing.filePath);
@@ -383,6 +406,7 @@ router.get("/:id/file", async (req: AuthRequest, res) => {
       fileData: true,
       fileMime: true,
       filePath: true,
+      fileKey: true,
       fileName: true,
     },
   });
@@ -394,7 +418,18 @@ router.get("/:id/file", async (req: AuthRequest, res) => {
   const disposition = req.query.download === "1" ? "attachment" : "inline";
   const safeName = (doc.fileName || "evrak").replace(/"/g, "");
 
-  // Kalıcı disk önce (büyük dosyalar DB’ye yazılmıyor)
+  // Kalıcı depo önce
+  if (doc.fileKey) {
+    const stored = await downloadObject(doc.fileKey);
+    if (stored) {
+      res.setHeader("Content-Type", doc.fileMime || stored.contentType);
+      res.setHeader("Content-Disposition", `${disposition}; filename="${safeName}"`);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.send(stored.body);
+      return;
+    }
+  }
+
   if (doc.filePath) {
     const p = resolveStoredPath(doc.filePath);
     if (fs.existsSync(p)) {

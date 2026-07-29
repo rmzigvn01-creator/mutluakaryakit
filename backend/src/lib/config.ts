@@ -13,6 +13,9 @@ export const config = {
   uploadDir: process.env.UPLOAD_DIR
     ? path.resolve(process.env.UPLOAD_DIR)
     : path.join(backendRoot, "uploads"),
+  supabaseUrl: (process.env.SUPABASE_URL ?? "").trim().replace(/\/+$/, ""),
+  supabaseServiceKey: (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim(),
+  supabaseBucket: (process.env.SUPABASE_BUCKET ?? "mutlu-files").trim(),
   ocrToleranceTl: parseFloat(process.env.OCR_TOLERANCE_TL ?? "2"),
   ocrTimeToleranceMinutes: parseInt(process.env.OCR_TIME_TOLERANCE_MINUTES ?? "30", 10),
   backendRoot,

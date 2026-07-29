@@ -270,6 +270,8 @@ model WorkOrder {
   completedBy   User?           @relation("WorkOrderCompletedBy", fields: [completedById], references: [id])
   completedAt   DateTime?
   photoPath     String?
+  /// Supabase Storage anahtarı (kalıcı depo)
+  photoKey      String?
   photoMime     String?
   photoName     String?
   createdAt     DateTime        @default(now())
@@ -288,6 +290,8 @@ model StationDocument {
   expiresAt   DateTime?
   fileName    String
   filePath    String?
+  /// Supabase Storage anahtarı (kalıcı depo)
+  fileKey     String?
   /// Belge dosyası (Neon'da kalıcı; disk kaybına karşı)
   fileData    Bytes?
   fileMime    String?
