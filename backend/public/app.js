@@ -366,18 +366,18 @@ function canViewReceipt() {
 }
 
 function showLogin() {
+  stopHeaderQr();
   document.getElementById('loginScreen').classList.remove('hidden');
   document.getElementById('app').classList.add('hidden');
-  startLoginScreenQr();
 }
 
 function showApp() {
-  stopLoginScreenQr();
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('headerUserLabel').textContent =
     `${currentUser.name} · ${ROLE_LABELS[currentUser.role] || currentUser.role}`;
   updatePendingBadge();
+  void startHeaderQr();
   showHome();
 }
 
@@ -406,7 +406,7 @@ async function doLogin() {
 
 function doLogout() {
   stopChatPoll();
-  stopShiftQrPoll();
+  stopHeaderQr();
   stopShiftQrScanner();
   token = null;
   currentUser = null;
@@ -483,7 +483,8 @@ async function startShiftWithQrToken(qrToken) {
 let shiftQrPollTimer = null;
 let shiftQrScanner = null;
 let shiftQrRefreshLock = false;
-let loginQrActive = false;
+let headerQrActive = false;
+let shiftQrPayload = '';
 
 function stopShiftQrPoll() {
   if (shiftQrPollTimer) {
@@ -492,9 +493,16 @@ function stopShiftQrPoll() {
   }
 }
 
-function stopLoginScreenQr() {
-  loginQrActive = false;
+/** QR yalnızca işyeri bilgisayarındaki yönetici/muhasebeci ekranında durur */
+function canDisplayShiftQr() {
+  return currentUser?.role === 'ADMIN' || currentUser?.role === 'ACCOUNTANT';
+}
+
+function stopHeaderQr() {
+  headerQrActive = false;
+  shiftQrPayload = '';
   stopShiftQrPoll();
+  document.getElementById('headerQr')?.classList.add('hidden');
 }
 
 function stopShiftQrScanner() {
@@ -505,9 +513,8 @@ function stopShiftQrScanner() {
   }
 }
 
-async function renderQrPayload(payload, imgEl, canvasEl) {
+async function renderQrPayload(payload, imgEl, canvasEl, size = 220) {
   if (!payload) throw new Error('QR içerik yok');
-  const size = 220;
   // 1) qrcode lib → data URL
   if (typeof QRCode !== 'undefined' && typeof QRCode.toDataURL === 'function') {
     const url = await QRCode.toDataURL(payload, {
@@ -541,63 +548,89 @@ async function renderQrPayload(payload, imgEl, canvasEl) {
   }
 }
 
-/** Giriş ekranındaki istasyon QR — oturumsuz, 30 sn’de bir */
-async function startLoginScreenQr() {
-  loginQrActive = true;
-  stopShiftQrPoll();
-  const statusEl = document.getElementById('loginQrStatus');
-  const timerEl = document.getElementById('loginQrTimer');
-  const imgEl = document.getElementById('loginQrImg');
-  const canvasEl = document.getElementById('loginQrCanvas');
+function clearShiftQrDisplay() {
+  shiftQrPayload = '';
+  ['headerQrImg', 'shiftQrBigImg'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.removeAttribute('src');
+      el.classList.add('hidden');
+    }
+  });
+  ['headerQrCanvas', 'shiftQrBigCanvas'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      const ctx = el.getContext?.('2d');
+      if (ctx) ctx.clearRect(0, 0, el.width, el.height);
+      el.classList.add('hidden');
+    }
+  });
+}
 
-  const clearDisplayedQr = () => {
-    if (imgEl) {
-      imgEl.removeAttribute('src');
-      imgEl.classList.add('hidden');
-    }
-    if (canvasEl) {
-      const ctx = canvasEl.getContext?.('2d');
-      if (ctx) ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-      canvasEl.classList.add('hidden');
-    }
-  };
+/** Aynı kodu hem üst şeride hem (açıksa) büyük pencereye çiz */
+async function paintShiftQr(payload) {
+  shiftQrPayload = payload;
+  await renderQrPayload(
+    payload,
+    document.getElementById('headerQrImg'),
+    document.getElementById('headerQrCanvas'),
+    88
+  );
+  const bigImg = document.getElementById('shiftQrBigImg');
+  if (bigImg) {
+    await renderQrPayload(payload, bigImg, document.getElementById('shiftQrBigCanvas'), 300);
+  }
+}
+
+function setShiftQrTimerText(text) {
+  ['headerQrTimer', 'shiftQrBigTimer'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  });
+}
+
+/** İşyeri bilgisayarı: üst şeritte sürekli açık kalan vardiya QR’ı */
+async function startHeaderQr() {
+  const panel = document.getElementById('headerQr');
+  if (!canDisplayShiftQr()) {
+    stopHeaderQr();
+    return;
+  }
+  headerQrActive = true;
+  stopShiftQrPoll();
+  panel?.classList.remove('hidden');
 
   const refresh = async () => {
-    if (!loginQrActive || shiftQrRefreshLock) return;
+    if (!headerQrActive || shiftQrRefreshLock) return;
     shiftQrRefreshLock = true;
     try {
       const res = await fetch('/api/shifts/public-qr', { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'QR alınamadı');
-      await renderQrPayload(data.payload || data.token, imgEl, canvasEl);
-      if (statusEl) {
-        statusEl.textContent = data.stationName
-          ? `${data.stationName} · yalnızca bu kod`
-          : 'Yalnızca bu kod geçerli';
-      }
+      await paintShiftQr(data.payload || data.token);
+
       const ends = new Date(data.expiresAt).getTime();
       if (shiftQrPollTimer) clearInterval(shiftQrPollTimer);
       shiftQrPollTimer = setInterval(() => {
-        if (!loginQrActive) {
+        if (!headerQrActive) {
           stopShiftQrPoll();
           return;
         }
         const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
-        if (timerEl) timerEl.textContent = left > 0 ? String(left) : '…';
+        setShiftQrTimerText(left > 0 ? `${left} sn` : '…');
         if (left <= 0) {
           clearInterval(shiftQrPollTimer);
           shiftQrPollTimer = null;
           // Süresi biten kodu hemen kaldır — fotoğraflanan eski kod ekranda kalmasın
-          clearDisplayedQr();
-          if (statusEl) statusEl.textContent = 'Yenileniyor…';
+          clearShiftQrDisplay();
           void refresh();
         }
       }, 250);
     } catch (e) {
-      clearDisplayedQr();
-      if (statusEl) statusEl.textContent = e.message || 'QR yüklenemedi';
-      if (timerEl) timerEl.textContent = '!';
-      setTimeout(() => { if (loginQrActive) void refresh(); }, 5000);
+      clearShiftQrDisplay();
+      setShiftQrTimerText('!');
+      console.warn('QR alınamadı', e);
+      setTimeout(() => { if (headerQrActive) void refresh(); }, 5000);
     } finally {
       shiftQrRefreshLock = false;
     }
@@ -605,10 +638,20 @@ async function startLoginScreenQr() {
   await refresh();
 }
 
-/** Eski menü — QR artık giriş ekranında; çıkış yapıp o ekranı aç */
-async function showShiftQrDisplay() {
-  toast('QR giriş ekranında — işyeri PC’sinde o ekranı açık bırakın');
-  doLogout();
+/** Üst şeritteki koda tıklayınca büyük gösterim */
+function openShiftQrLarge() {
+  if (!canDisplayShiftQr()) return;
+  openModal('Vardiya QR', `
+    <p class="credit-hint">Personel telefonundan bu kodu okutsun. Kod <strong>30 saniyede bir yenilenir</strong>; eski fotoğraf kabul edilmez.</p>
+    <div class="shift-qr-big">
+      <div class="shift-qr-canvas-wrap">
+        <img id="shiftQrBigImg" class="shift-qr-big-img hidden" alt="Vardiya QR" width="300" height="300">
+        <canvas id="shiftQrBigCanvas" class="hidden" width="300" height="300"></canvas>
+      </div>
+      <div class="shift-qr-timer" id="shiftQrBigTimer">—</div>
+    </div>
+  `);
+  if (shiftQrPayload) void paintShiftQr(shiftQrPayload);
 }
 
 function extractShiftQrToken(raw) {
@@ -620,7 +663,7 @@ function extractShiftQrToken(raw) {
 async function openQrScannerModal({ title, onToken }) {
   stopShiftQrScanner();
   openModal(title, `
-    <p class="credit-hint">Kamerayı <strong>işyeri giriş ekranındaki</strong> Vardiya QR’ına tutun. Başka kod kabul edilmez.</p>
+    <p class="credit-hint">Kamerayı <strong>işyeri bilgisayarının üst şeridindeki</strong> Vardiya QR’ına tutun. Başka kod kabul edilmez.</p>
     <div id="shiftQrReader" class="shift-qr-reader"></div>
     <div class="modal-footer" style="padding:8px 0 0">
       <button type="button" class="btn btn-secondary" id="shiftQrCancelBtn">İptal</button>
@@ -646,7 +689,7 @@ async function openQrScannerModal({ title, onToken }) {
         if (handled) return;
         const qrToken = extractShiftQrToken(decoded);
         if (!qrToken) {
-          toast('Bu QR sistem kodu değil — giriş ekranındaki kodu okutun');
+          toast('Bu QR sistem kodu değil — işyeri ekranındaki kodu okutun');
           return;
         }
         handled = true;
@@ -706,7 +749,7 @@ async function startLoggedInShiftQrScan() {
   });
 }
 
-window.showShiftQrDisplay = showShiftQrDisplay;
+window.openShiftQrLarge = openShiftQrLarge;
 window.startLoginShiftQrScan = startLoginShiftQrScan;
 window.startLoggedInShiftQrScan = startLoggedInShiftQrScan;
 

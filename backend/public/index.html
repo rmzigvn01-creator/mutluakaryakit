@@ -10,11 +10,11 @@
   <title>Mutlu Akaryakıt | Petrol Ofisi Bayi</title>
   <link rel="icon" type="image/png" href="/favicon-po.png">
   <link rel="apple-touch-icon" href="/logo-po-mark-red.png">
-  <link rel="stylesheet" href="/style.css?v=49">
+  <link rel="stylesheet" href="/style.css?v=50">
 </head>
 <body>
 
-<!-- GİRİŞ + İSTASYON QR (işyeri PC bu ekranı açık tutar) -->
+<!-- GİRİŞ -->
 <div id="loginScreen" class="login-screen">
   <div class="login-top-brand">
     <div class="po-logo">
@@ -24,38 +24,24 @@
     <p class="po-dealer-name">Mutlu Akaryakıt</p>
   </div>
 
-  <div class="login-main">
-    <!-- İşyeri bilgisayarında sürekli gösterilen QR -->
-    <div class="login-qr-panel" id="loginQrPanel">
-      <p class="login-qr-label">Vardiya QR</p>
-      <p class="login-qr-sub">Personel telefonundan bu kodu okutsun · 30 sn’de bir yenilenir</p>
-      <div class="shift-qr-canvas-wrap login-qr-wrap">
-        <img id="loginQrImg" class="login-qr-img hidden" alt="Vardiya QR" width="220" height="220">
-        <canvas id="loginQrCanvas" class="hidden" width="220" height="220"></canvas>
-      </div>
-      <div class="shift-qr-timer" id="loginQrTimer">—</div>
-      <p class="login-qr-status" id="loginQrStatus">QR yükleniyor…</p>
+  <div class="login-box">
+    <div class="login-box-header">
+      <p class="po-subtitle">Satış & Ödeme Yönetim Sistemi</p>
     </div>
-
-    <div class="login-box">
-      <div class="login-box-header">
-        <p class="po-subtitle">Satış & Ödeme Yönetim Sistemi</p>
-      </div>
-      <div id="loginError" class="error-msg hidden"></div>
-      <div class="form-group">
-        <label>Kullanıcı adı</label>
-        <input type="text" id="loginUsername" placeholder="örn: ahmet" autocomplete="username">
-      </div>
-      <div class="form-group">
-        <label>Şifre</label>
-        <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
-      </div>
-      <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Giriş Yap</button>
-      <button class="btn btn-secondary login-qr-btn" type="button" onclick="startLoginShiftQrScan()">
-        Kamerayla QR okut · vardiya başlat
-      </button>
-      <p class="login-qr-hint">Telefonda: nick + şifre yazın, ardından yanındaki güncel QR’ı kamerayla okutun. Eski fotoğraf kabul edilmez.</p>
+    <div id="loginError" class="error-msg hidden"></div>
+    <div class="form-group">
+      <label>Kullanıcı adı</label>
+      <input type="text" id="loginUsername" placeholder="örn: ahmet" autocomplete="username">
     </div>
+    <div class="form-group">
+      <label>Şifre</label>
+      <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Giriş Yap</button>
+    <button class="btn btn-secondary login-qr-btn" type="button" onclick="startLoginShiftQrScan()">
+      Kamerayla QR okut · vardiya başlat
+    </button>
+    <p class="login-qr-hint">Telefonda: nick + şifre yazın, ardından işyeri bilgisayarının üst şeridindeki güncel QR’ı kamerayla okutun. Eski fotoğraf kabul edilmez.</p>
   </div>
 
   <p class="login-footer">Petrol Ofisi Bayi · Mutlu Akaryakıt © 2026</p>
@@ -72,6 +58,20 @@
           <div class="dealer">Mutlu Akaryakıt</div>
           <div class="page" id="headerTitle">Ana Menü</div>
         </div>
+
+        <!-- İşyeri bilgisayarı: sürekli açık kalan vardiya QR’ı -->
+        <button type="button" class="header-qr hidden" id="headerQr" onclick="openShiftQrLarge()"
+                title="Büyütmek için tıklayın">
+          <span class="header-qr-code">
+            <img id="headerQrImg" class="hidden" alt="Vardiya QR" width="76" height="76">
+            <canvas id="headerQrCanvas" class="hidden" width="76" height="76"></canvas>
+          </span>
+          <span class="header-qr-text">
+            <span class="header-qr-title">Vardiya QR</span>
+            <span class="header-qr-sub">30 saniyede bir yenilenir</span>
+            <span class="header-qr-timer" id="headerQrTimer">—</span>
+          </span>
+        </button>
       </div>
       <div class="header-right">
         <span id="pendingBadge" class="badge hidden"></span>
@@ -91,6 +91,6 @@
 <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="/app.js?v=49"></script>
+<script src="/app.js?v=50"></script>
 </body>
 </html>
