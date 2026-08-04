@@ -1643,32 +1643,53 @@ async function showTransactions() {
 function renderTx(t) {
   const suspicious = isAdmin() && ['SUSPICIOUS_MISMATCH','SUSPICIOUS_DATETIME_MISMATCH','SUSPICIOUS_UNREADABLE','PENDING_OCR'].includes(t.suspicionStatus);
   const badgeClass = suspicious ? 'suspicious' : 'normal';
-  const isAdminUser = canViewReceipt();
-  const receiptBtn = isAdminUser
-    ? `<button class="btn btn-sm btn-primary" onclick="showReceiptViewer('${t.id}')">Fiş Gör</button>`
+  const statusLabel = isAdmin() ? (SUSPICION_LABELS[t.suspicionStatus] || t.suspicionStatus) : 'Normal';
+  const who = t.createdBy?.name || '';
+  const facts = [];
+  facts.push(`<div class="tx-fact"><span>Zaman</span><strong>${fmtDate(t.createdAt)}</strong></div>`);
+  if (who) facts.push(`<div class="tx-fact"><span>Pompacı</span><strong>${escHtml(who)}</strong></div>`);
+  if (t.isCredit) {
+    facts.push(`<div class="tx-fact"><span>Veresiye</span><strong>${escHtml(t.customer?.name || 'Evet')}</strong></div>`);
+  }
+  if (t.isCompanyVehicle) {
+    const v = t.vehicle ? `${t.vehicle.name} · ${t.vehicle.plate}` : 'Evet';
+    facts.push(`<div class="tx-fact"><span>Araç</span><strong>${escHtml(v)}</strong></div>`);
+  }
+  if (isAdmin() && t.receiptAmount != null) {
+    facts.push(`<div class="tx-fact"><span>Fiş</span><strong>${fmt(t.receiptAmount)}</strong></div>`);
+    facts.push(`<div class="tx-fact"><span>Fark</span><strong class="${(t.amountDiff||0) ? 'is-warn' : ''}">${fmt(t.amountDiff||0)}</strong></div>`);
+  }
+
+  const tags = [];
+  if (t.isCredit) tags.push('<span class="tx-chip is-credit">Veresiye</span>');
+  if (t.isCompanyVehicle) tags.push('<span class="tx-chip is-vehicle">Şirket aracı</span>');
+
+  const mismatch = isAdmin() && t.receiptDateTime
+    ? renderDateTimeMismatchHtml(t.createdAt, t.receiptDateTime)
     : '';
-  return `<div class="tx-item${suspicious ? ' suspicious' : ''}">
-    <div class="tx-header">
+
+  const receiptBtn = canViewReceipt()
+    ? `<button type="button" class="btn btn-sm btn-secondary" onclick="showReceiptViewer('${t.id}')">Fiş</button>`
+    : '';
+
+  return `<article class="tx-card${suspicious ? ' is-warn' : ''}">
+    <header class="tx-card-head">
       <div>
         <div class="tx-amount">${fmt(t.enteredAmount)}</div>
         <div class="tx-type">${TYPE_LABELS[t.type] || t.type}</div>
       </div>
-      <span class="tx-badge ${badgeClass}">${isAdmin() ? (SUSPICION_LABELS[t.suspicionStatus] || t.suspicionStatus) : 'Normal'}</span>
-    </div>
-    <div class="tx-meta">
-      ${fmtDate(t.createdAt)}${t.createdBy ? ' · ' + t.createdBy.name : ''}
-      ${t.isCredit ? '<br><strong style="color:var(--po-warning)">📒 Veresiye</strong>' + (t.customer?.name ? ' · ' + t.customer.name : '') : ''}
-      ${t.isCompanyVehicle ? '<br><strong style="color:var(--po-red)">🚗 Şirket aracı</strong>' + (t.vehicle ? ' · ' + t.vehicle.name + ' · ' + t.vehicle.plate : '') : ''}
-      ${isAdmin() && t.receiptAmount ? `<br>Fiş tutarı: ${fmt(t.receiptAmount)} · Fark: ${fmt(t.amountDiff||0)}` : ''}
-      ${isAdmin() && t.receiptDateTime ? renderDateTimeMismatchHtml(t.createdAt, t.receiptDateTime) : ''}
-      ${t.description ? '<br>' + t.description : ''}
-    </div>
+      <span class="tx-badge ${badgeClass}">${statusLabel}</span>
+    </header>
+    ${tags.length ? `<div class="tx-chips">${tags.join('')}</div>` : ''}
+    <div class="tx-facts">${facts.join('')}</div>
+    ${mismatch}
+    ${t.description ? `<p class="tx-note">${escHtml(t.description)}</p>` : ''}
     <div class="tx-actions">
       ${receiptBtn}
-      <button class="btn btn-sm btn-secondary" onclick="showTransactionDetail('${t.id}')">Detay</button>
-      ${currentUser.role !== 'STAFF' ? `<button class="btn btn-sm btn-secondary" onclick="openCorrectionModal('${t.id}', ${t.enteredAmount})">Düzeltme Talebi</button>` : ''}
+      <button type="button" class="btn btn-sm btn-secondary" onclick="showTransactionDetail('${t.id}')">Detay</button>
+      ${currentUser.role !== 'STAFF' ? `<button type="button" class="btn btn-sm btn-primary" onclick="openCorrectionModal('${t.id}', ${t.enteredAmount})">Düzelt</button>` : ''}
     </div>
-  </div>`;
+  </article>`;
 }
 
 async function showTransactionDetail(txId) {
