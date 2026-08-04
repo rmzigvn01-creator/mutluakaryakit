@@ -440,38 +440,35 @@ function renderShiftBanner(shiftData) {
   const { shift, summary } = shiftData;
   if (!shift && (currentUser.role === 'STAFF' || currentUser.role === 'ADMIN')) {
     return `
-      <div class="shift-banner closed-style">
-        <div class="shift-banner-header">
-          <h3>⏱ Vardiya</h3>
-          <span class="shift-status" style="background:#FFF3E0;color:#F57C00">Kapalı</span>
+      <section class="shift-strip is-closed" aria-label="Vardiya">
+        <div class="shift-strip-main">
+          <div class="shift-strip-label">Vardiya kapalı</div>
+          <p class="shift-strip-hint">Başlamak için işyeri bilgisayarındaki güncel QR’ı okutun</p>
         </div>
-        <p style="font-size:13px;color:var(--po-gray);margin-bottom:12px">
-          Vardiya yalnızca <strong>işyeri bilgisayarındaki güncel QR</strong> ile başlar.
-          Eski veya başka bir QR kabul edilmez.
-        </p>
-        <button class="btn btn-primary" onclick="startLoggedInShiftQrScan()">İşyeri QR’ını okut</button>
-      </div>`;
+        <button type="button" class="btn btn-primary shift-strip-btn" onclick="startLoggedInShiftQrScan()">QR okut</button>
+      </section>`;
   }
   if (!shift) return '';
 
   const started = fmtDate(shift.startedAt);
   return `
-    <div class="shift-banner">
-      <div class="shift-banner-header">
-        <h3>⏱ Aktif Vardiya</h3>
-        <span class="shift-status">Açık</span>
+    <section class="shift-strip is-open" aria-label="Aktif vardiya">
+      <div class="shift-strip-main">
+        <div class="shift-strip-top">
+          <span class="shift-pill">Açık</span>
+          <span class="shift-strip-time">${started}</span>
+        </div>
+        <div class="shift-strip-stats">
+          <div><strong>${summary?.transactionCount || 0}</strong><span>işlem</span></div>
+          <div><strong>${fmt(summary?.totalAmount || 0)}</strong><span>toplam</span></div>
+          ${isAdmin() ? `<div><strong>${summary?.suspiciousCount || 0}</strong><span>şüpheli</span></div>` : ''}
+        </div>
       </div>
-      <p style="font-size:12px;color:var(--po-gray)">Başlangıç: ${started}</p>
-      <div class="shift-stats">
-        <div class="shift-stat"><div class="val">${summary?.transactionCount || 0}</div><div class="lbl">İşlem</div></div>
-        <div class="shift-stat"><div class="val">${fmt(summary?.totalAmount || 0)}</div><div class="lbl">Toplam</div></div>
-        ${isAdmin() ? `<div class="shift-stat"><div class="val">${summary?.suspiciousCount || 0}</div><div class="lbl">Şüpheli</div></div>` : ''}
+      <div class="shift-strip-actions">
+        <button type="button" class="btn btn-sm btn-secondary" onclick="showShiftDetail('${shift.id}')">Detay</button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="openEndShiftModal('${shift.id}')">Bitir</button>
       </div>
-      <div class="shift-actions">
-        <button class="btn btn-secondary" onclick="showShiftDetail('${shift.id}')">Detay</button>
-        <button class="btn btn-primary" onclick="openEndShiftModal('${shift.id}')">Vardiya Bitir</button>
-      </div>
-    </div>`;
+    </section>`;
 }
 
 async function startShiftWithQrToken(qrToken) {
@@ -870,51 +867,71 @@ async function showHome() {
   ]);
 
   const openOrders = woMeta.openCount || 0;
+  const firstName = escHtml(currentUser.name.split(' ')[0]);
+  const role = ROLE_LABELS[currentUser.role] || currentUser.role;
 
-  let html = `
-    <div class="welcome-banner">
-      <h2>Merhaba, ${escHtml(currentUser.name.split(' ')[0])}</h2>
-      <p>${ROLE_LABELS[currentUser.role]} · Mutlu Akaryakıt</p>
-    </div>
-    ${renderAnnouncementsHome(announcements)}
-    ${renderShiftBanner(shiftData)}
-    <div id="fuelPriceCard"><p class="empty" style="padding:12px">Fiyatlar yükleniyor...</p></div>
-    <p class="section-label">Hızlı işlemler</p>
-    <div class="menu-grid">`;
-
+  let primary = '';
   if (isStaff || isAdmin) {
     if (isStaff && !shiftData.shift) {
-      html += menuCard('⛽', 'Yeni İşlem', 'Önce vardiya başlatın', 'requireShiftThenNewTx()');
+      primary = primaryCta('Yeni işlem', 'Önce vardiyayı QR ile başlatın', 'requireShiftThenNewTx()');
     } else {
-      html += menuCard('⛽', 'Yeni İşlem', 'Fiş fotoğrafı zorunlu', 'showNewTransaction()');
+      primary = primaryCta('Yeni işlem', 'Fiş fotoğrafı ile satış kaydı', 'showNewTransaction()');
     }
+  } else if (isAccountant) {
+    primary = primaryCta('Gün sonu raporu', 'Günlük kapanış özeti ve indirme', 'showDayClose()');
   }
-  html += menuCard(
-    '🔧',
-    'İş Emirleri',
-    openOrders > 0 ? `${openOrders} açık görev` : 'Görevler · fotoğrafla tamamla',
-    'showWorkOrders()',
-    openOrders > 0
-  );
-  html += menuCard('🧾', 'İşlem Listesi', 'Tüm satış ve ödeme kayıtları', 'showTransactions()');
-  html += menuCard('⏱', 'Vardiya Raporları', 'Pompacı vardiya geçmişi', 'showShifts()');
-  html += menuCard('💬', 'Sohbet', 'Ekip içi mesajlaşma', 'showChat()');
+
+  const tiles = [];
+  tiles.push(actionTile('🔧', 'İş emirleri', openOrders > 0 ? `${openOrders} açık` : 'Görevler', 'showWorkOrders()', openOrders > 0));
+  tiles.push(actionTile('🧾', 'İşlemler', 'Satış listesi', 'showTransactions()'));
+  tiles.push(actionTile('⏱', 'Vardiyalar', 'Geçmiş raporlar', 'showShifts()'));
+  tiles.push(actionTile('💬', 'Sohbet', 'Ekip mesajları', 'showChat()'));
 
   if (isAccountant && !isAdmin) {
-    html += menuCard('🌙', 'Gün Sonu Raporu', 'Günlük kapanış özeti ve indirme', 'showDayClose()');
-    html += menuCard('✅', 'Düzeltme Talepleri', 'Onay bekleyen / açılan talepler', 'showCorrections()');
-    html += menuCard('📥', 'Excel Raporu', 'Dönem kayıtlarını indir', 'showExport()');
+    tiles.push(actionTile('✅', 'Düzeltmeler', 'Onay bekleyen', 'showCorrections()'));
+    tiles.push(actionTile('📥', 'Excel', 'Dönem indir', 'showExport()'));
   }
-
   if (isAdmin) {
-    html += menuCard('📊', 'Yönetici Paneli', 'Duyuru, üye, veresiye ve kontroller', 'showDashboard()');
+    tiles.push(actionTile('📊', 'Yönetici', 'Üye, evrak, kontrol', 'showDashboard()'));
   }
+  tiles.push(actionTile('⚙️', 'Ayarlar', 'Şifre değiştir', 'showSettings()'));
 
-  html += menuCard('⚙️', 'Ayarlar', 'Şifre değiştir', 'showSettings()');
-
-  html += '</div>';
-  document.getElementById('mainContent').innerHTML = html;
+  document.getElementById('mainContent').innerHTML = `
+    <div class="home-console">
+      <header class="home-status">
+        <div>
+          <p class="home-status-kicker">Mutlu Akaryakıt</p>
+          <h1 class="home-status-name">${firstName}</h1>
+        </div>
+        <span class="home-role">${escHtml(role)}</span>
+      </header>
+      ${renderAnnouncementsHome(announcements)}
+      ${renderShiftBanner(shiftData)}
+      <div id="fuelPriceCard"><p class="empty" style="padding:12px">Fiyatlar yükleniyor...</p></div>
+      ${primary}
+      <p class="section-label">Diğer işlemler</p>
+      <div class="action-grid">${tiles.join('')}</div>
+    </div>`;
   void loadFuelPriceCard();
+}
+
+function primaryCta(title, sub, onclick) {
+  return `<button type="button" class="cta-hero" onclick="${onclick}">
+    <span class="cta-hero-copy">
+      <span class="cta-hero-kicker">Ana işlem</span>
+      <span class="cta-hero-title">${title}</span>
+      <span class="cta-hero-sub">${sub}</span>
+    </span>
+    <span class="cta-hero-go" aria-hidden="true">→</span>
+  </button>`;
+}
+
+function actionTile(icon, title, sub, onclick, warning = false) {
+  return `<button type="button" class="action-tile${warning ? ' warn' : ''}" onclick="${onclick}">
+    <span class="action-tile-icon" aria-hidden="true">${icon}</span>
+    <span class="action-tile-title">${title}</span>
+    <span class="action-tile-sub">${sub}</span>
+  </button>`;
 }
 
 function renderAnnouncementsHome(list) {
@@ -1102,11 +1119,11 @@ async function loadFuelPriceCard() {
       ? `<button class="btn btn-sm btn-secondary" onclick="refreshFuelPrices()">Yenile</button>`
       : '';
     el.innerHTML = `
-      <div class="fuel-price-card">
+      <div class="fuel-price-card pump-board">
         <div class="fuel-price-head">
           <div>
-            <div class="fuel-price-title">Akaryakıt Fiyatları</div>
-            <div class="fuel-price-sub">${loc} · KDV dahil · Petrol Ofisi</div>
+            <div class="fuel-price-title">Pompa fiyatları</div>
+            <div class="fuel-price-sub">${loc} · KDV dahil</div>
           </div>
           ${refreshed}
         </div>
@@ -1127,7 +1144,6 @@ async function loadFuelPriceCard() {
             <span class="unit">TL/LT</span>
           </div>
         </div>
-        <div class="fuel-price-meta">Son güncelleme: ${fmtDate(p.fetchedAt)} · her ${Math.round((data.pollIntervalMs || 300000)/60000)} dk</div>
       </div>`;
   } catch (e) {
     el.innerHTML = `<p class="empty" style="padding:12px">Fiyatlar alınamadı: ${e.message}</p>`;
