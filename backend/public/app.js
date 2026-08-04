@@ -873,13 +873,13 @@ async function showHome() {
 
   let html = `
     <div class="welcome-banner">
-      <h2>Hoş geldiniz, ${escHtml(currentUser.name.split(' ')[0])}</h2>
-      <p>Petrol Ofisi · Mutlu Akaryakıt · ${ROLE_LABELS[currentUser.role]}</p>
+      <h2>Merhaba, ${escHtml(currentUser.name.split(' ')[0])}</h2>
+      <p>${ROLE_LABELS[currentUser.role]} · Mutlu Akaryakıt</p>
     </div>
     ${renderAnnouncementsHome(announcements)}
     ${renderShiftBanner(shiftData)}
     <div id="fuelPriceCard"><p class="empty" style="padding:12px">Fiyatlar yükleniyor...</p></div>
-    <p class="section-label">Menü</p>
+    <p class="section-label">Hızlı işlemler</p>
     <div class="menu-grid">`;
 
   if (isStaff || isAdmin) {
@@ -1143,16 +1143,18 @@ async function refreshFuelPrices() {
 }
 
 function menuCard(icon, title, sub, onclick, warning = false) {
-  return `<div class="menu-card${warning ? ' warning' : ''}" onclick="${onclick}">
-    <div class="icon-wrap">${icon}</div>
+  return `<div class="menu-card${warning ? ' warning' : ''}" role="button" tabindex="0"
+    onclick="${onclick}"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${onclick}}">
+    <div class="icon-wrap" aria-hidden="true">${icon}</div>
     <div class="info"><h3>${title}</h3><p>${sub}</p></div>
-    <span class="arrow">›</span>
+    <span class="arrow" aria-hidden="true">›</span>
   </div>`;
 }
 
 function pageHeader(title, back = 'showHome()') {
   return `<div class="page-header">
-    <button class="back-btn" onclick="${back}">←</button>
+    <button type="button" class="back-btn" onclick="${back}" aria-label="Geri">←</button>
     <h2>${title}</h2>
   </div>`;
 }
