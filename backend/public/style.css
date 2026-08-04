@@ -2118,13 +2118,6 @@ body {
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-.tx-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-
 /* ===== EVRAK MERKEZI ===== */
 .doc-filters {
   display: flex;
@@ -2175,20 +2168,24 @@ body {
 .doc-item {
   background: #fff;
   border: 1.5px solid var(--po-border);
-  border-radius: 14px;
-  padding: 14px 14px 12px;
+  border-left: 5px solid var(--po-steel);
+  border-radius: var(--radius);
+  padding: 16px;
   margin-bottom: 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  box-shadow: var(--shadow);
 }
 .doc-item.expired {
-  border-color: #EF9A9A;
-  background: #FFF8F8;
+  border-left-color: #C62828;
+  border-color: var(--po-border);
+  background: #fff;
 }
 .doc-item.expiring {
-  border-color: #FFCC80;
-  background: #FFFBF5;
+  border-left-color: var(--po-warning);
+  border-color: var(--po-border);
+  background: #fff;
 }
 .doc-item-top {
   display: flex;
